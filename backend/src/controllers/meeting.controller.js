@@ -5,6 +5,7 @@ import User from "../models/User.js";
 import { generateMeetingCode } from "../utils/generateMeetingCode.js";
 import { serializeMeeting, isValidObjectId } from "../utils/meetingSerializer.js";
 import * as cache from "../services/cache.service.js";
+import { notifyUsers } from "../services/notification.service.js";
 
 async function findMeetingByParam(idOrCode) {
   if (isValidObjectId(idOrCode)) {
@@ -51,6 +52,11 @@ export const createMeeting = asyncHandler(async (req, res) => {
     .populate("actionItems.assignee", "name email role avatar");
   await User.updateMany({ _id: { $in: participantIds } }, { $addToSet: { meetings: meeting._id } });
   await cache.invalidateMeetingCache(String(meeting._id));
+  await notifyUsers(participantIds.filter((id) => id !== hostId), {
+    type: "meeting",
+    meeting: meeting._id,
+    message: `You were invited to ${meeting.title}`,
+  });
   res.status(201).json({ meeting: serializeMeeting(populated) });
 });
 
@@ -121,6 +127,11 @@ export const updateMeeting = asyncHandler(async (req, res) => {
     .populate("participants", "name email role avatar")
     .populate("actionItems.assignee", "name email role avatar");
   await cache.invalidateMeetingCache(String(m._id));
+  await notifyUsers(m.participants.filter((id) => String(id) !== String(req.user._id)), {
+    type: "meeting",
+    meeting: m._id,
+    message: `Meeting updated: ${m.title}`,
+  });
   res.json({ meeting: serializeMeeting(populated) });
 });
 

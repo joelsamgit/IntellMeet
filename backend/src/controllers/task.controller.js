@@ -2,6 +2,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError } from "../utils/AppError.js";
 import Task from "../models/Task.js";
 import Team from "../models/Team.js";
+import { createNotification } from "../services/notification.service.js";
 
 function serializeTask(doc) {
   const t = doc.toObject ? doc.toObject() : doc;
@@ -51,6 +52,14 @@ export const createTask = asyncHandler(async (req, res) => {
   const populated = await Task.findById(task._id)
     .populate("assignee", "name email role avatar")
     .populate("team", "name");
+  if (task.assignee) {
+    await createNotification({
+      user: task.assignee,
+      type: "action_item",
+      task: task._id,
+      message: `New task assigned: ${task.title}`,
+    });
+  }
   res.status(201).json({ task: serializeTask(populated) });
 });
 
@@ -109,6 +118,14 @@ export const updateTask = asyncHandler(async (req, res) => {
   if (status !== undefined) task.status = status;
   if (dueDate !== undefined) task.dueDate = dueDate ? new Date(dueDate) : null;
   await task.save();
+  if (assigneeId !== undefined && task.assignee) {
+    await createNotification({
+      user: task.assignee,
+      type: "action_item",
+      task: task._id,
+      message: `Task updated: ${task.title}`,
+    });
+  }
   const populated = await Task.findById(task._id)
     .populate("assignee", "name email role avatar")
     .populate("team", "name");

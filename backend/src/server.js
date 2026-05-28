@@ -1,8 +1,10 @@
 import "dotenv/config";
+import http from "http";
 import app from "./app.js";
 import { connectDB } from "./config/db.js";
 import { initRedis } from "./config/redis.js";
 import { configureCloudinary } from "./config/cloudinary.js";
+import { initializeSocket } from "./services/socket.service.js";
 
 const PORT = Number(process.env.PORT || 5000);
 
@@ -20,7 +22,10 @@ async function bootstrap() {
   await connectDB();
   await initRedis();
 
-  app.listen(PORT, () => {
+  const server = http.createServer(app);
+  initializeSocket(server);
+
+  server.listen(PORT, () => {
     console.log(`IntellMeet API listening on port ${PORT}`);
   });
 }
