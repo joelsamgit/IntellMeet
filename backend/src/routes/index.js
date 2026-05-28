@@ -8,7 +8,6 @@ import notificationRoutes from "./notification.routes.js";
 import chatRoutes from "./chat.routes.js";
 import aiRoutes from "./ai.routes.js";
 import uploadRoutes from "./upload.routes.js";
-import aiRoutes from "./ai.routes.js";
 import { authLimiter, apiLimiter } from "../middleware/rateLimiters.js";
 
 const router = Router();
@@ -23,7 +22,6 @@ router.use("/notifications", notificationRoutes);
 router.use("/chat", chatRoutes);
 router.use("/ai", aiRoutes);
 router.use("/upload", uploadRoutes);
-router.use("/ai", aiRoutes);
 
 router.get("/health", (req, res) => {
   res.json({ ok: true, service: "intellmeet-api" });
