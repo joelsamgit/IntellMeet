@@ -17,6 +17,7 @@ import MeetingCard from "@/components/common/MeetingCard";
 import NewMeetingModal from "@/components/common/NewMeetingModal";
 import { Meeting } from "@/types";
 import { format } from "date-fns";
+import { useNotifications } from "@/hooks/useNotifications";
 
 const mockMeetings: Meeting[] = [
   {
@@ -112,6 +113,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  useNotifications();
 
   const liveMeetings = mockMeetings.filter((m) => m.status === "live");
   const scheduledMeetings = mockMeetings.filter((m) => m.status === "scheduled");

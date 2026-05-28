@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, X } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Message } from "@/types";
@@ -12,16 +12,19 @@ interface ChatPanelProps {
   messages: Message[];
   onSendMessage: (text: string) => void;
   onClose: () => void;
+  onTypingChange?: (isTyping: boolean) => void;
 }
 
 export default function ChatPanel({
   messages,
   onSendMessage,
   onClose,
+  onTypingChange,
 }: ChatPanelProps) {
   const { user } = useAuthStore();
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -31,7 +34,35 @@ export default function ChatPanel({
     if (!input.trim()) return;
     onSendMessage(input.trim());
     setInput("");
+    onTypingChange?.(false);
+    if (typingTimeoutRef.current) {
+      window.clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
   };
+
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    onTypingChange?.(value.length > 0);
+
+    if (typingTimeoutRef.current) {
+      window.clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = window.setTimeout(() => {
+      onTypingChange?.(false);
+      typingTimeoutRef.current = null;
+    }, 1200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        window.clearTimeout(typingTimeoutRef.current);
+      }
+      onTypingChange?.(false);
+    };
+  }, [onTypingChange]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -83,6 +114,9 @@ export default function ChatPanel({
                 <div className="w-7 flex-shrink-0">
                   {showAvatar && (
                     <Avatar className="w-7 h-7">
+                      {msg.senderAvatar ? (
+                        <AvatarImage src={msg.senderAvatar} alt={msg.senderName} />
+                      ) : null}
                       <AvatarFallback className="bg-indigo-600 text-white text-[10px]">
                         {msg.senderName.charAt(0)}
                       </AvatarFallback>
@@ -134,7 +168,7 @@ export default function ChatPanel({
         <div className="flex items-center gap-2">
           <Input
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
             className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 text-sm h-9 flex-1"

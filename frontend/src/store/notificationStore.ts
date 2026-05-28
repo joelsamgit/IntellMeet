@@ -1,5 +1,5 @@
-import { create } from "zustand";
-import { Notification } from "@/types";
+import { create } from 'zustand';
+import { Notification } from '@/types';
 
 interface NotificationState {
   notifications: Notification[];
@@ -7,49 +7,12 @@ interface NotificationState {
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   addNotification: (n: Notification) => void;
+  setNotifications: (ns: Notification[]) => void;
 }
 
-const mockNotifications: Notification[] = [
-  {
-    _id: "n1",
-    message: "Sarah Connor mentioned you in Sprint Planning",
-    read: false,
-    createdAt: new Date(Date.now() - 300000).toISOString(),
-    type: "mention",
-  },
-  {
-    _id: "n2",
-    message: "Action item assigned: Complete API integration",
-    read: false,
-    createdAt: new Date(Date.now() - 900000).toISOString(),
-    type: "action_item",
-  },
-  {
-    _id: "n3",
-    message: "Meeting 'Product Design Review' starts in 15 minutes",
-    read: false,
-    createdAt: new Date(Date.now() - 1800000).toISOString(),
-    type: "meeting",
-  },
-  {
-    _id: "n4",
-    message: "Mike Ross completed his action item",
-    read: true,
-    createdAt: new Date(Date.now() - 3600000).toISOString(),
-    type: "action_item",
-  },
-  {
-    _id: "n5",
-    message: "Q1 Quarterly Review recording is now available",
-    read: true,
-    createdAt: new Date(Date.now() - 7200000).toISOString(),
-    type: "meeting",
-  },
-];
-
 export const useNotificationStore = create<NotificationState>((set) => ({
-  notifications: mockNotifications,
-  unreadCount: mockNotifications.filter((n) => !n.read).length,
+  notifications: [],
+  unreadCount: 0,
 
   markAsRead: (id) =>
     set((state) => {
@@ -72,5 +35,11 @@ export const useNotificationStore = create<NotificationState>((set) => ({
     set((state) => ({
       notifications: [n, ...state.notifications],
       unreadCount: state.unreadCount + 1,
+    })),
+
+  setNotifications: (ns) =>
+    set(() => ({
+      notifications: ns,
+      unreadCount: ns.filter((n) => !n.read).length,
     })),
 }));

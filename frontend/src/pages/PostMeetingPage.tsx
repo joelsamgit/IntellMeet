@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -23,9 +23,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
+import { getActionItems, getMeetingSummary, getMeetingTranscript } from "@/api/ai";
 
 // Mock post-meeting data
-const meetingData = {
+const fallbackMeetingData = {
   id: "test-meeting-123",
   title: "Sprint Planning — Week 19",
   date: new Date(Date.now() - 3600000),
@@ -48,6 +49,7 @@ const meetingData = {
     {
       id: "a1",
       text: "Complete API integration and write unit tests",
+      assigneeName: "Mike Ross",
       assignee: { name: "Mike Ross", avatar: "" },
       due: "Tomorrow",
       priority: "high",
@@ -56,6 +58,7 @@ const meetingData = {
     {
       id: "a2",
       text: "Build dashboard UI components (charts, stats cards)",
+      assigneeName: "Sarah Connor",
       assignee: { name: "Sarah Connor", avatar: "" },
       due: "May 12",
       priority: "high",
@@ -64,6 +67,7 @@ const meetingData = {
     {
       id: "a3",
       text: "Fix mobile responsive design issues on login page",
+      assigneeName: "Anna Lee",
       assignee: { name: "Anna Lee", avatar: "" },
       due: "May 11",
       priority: "medium",
@@ -72,6 +76,7 @@ const meetingData = {
     {
       id: "a4",
       text: "Update sprint board with new tickets",
+      assigneeName: "Joel Thomas",
       assignee: { name: "Joel Thomas", avatar: "" },
       due: "Today",
       priority: "low",
@@ -106,10 +111,87 @@ const priorityConfig = {
 export default function PostMeetingPage() {
   const { meetingId } = useParams();
   const navigate = useNavigate();
+  const [meetingData, setMeetingData] = useState(fallbackMeetingData);
   const [checkedItems, setCheckedItems] = useState<string[]>(
-    meetingData.actionItems.filter((a) => a.status === "done").map((a) => a.id)
+    fallbackMeetingData.actionItems
+      .filter((a) => a.status === "done" || a.status === "completed")
+      .map((a) => a.id)
   );
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadAnalysis() {
+      if (!meetingId) return;
+
+      try {
+        const [summary, transcript, actionItems] = await Promise.all([
+          getMeetingSummary(meetingId),
+          getMeetingTranscript(meetingId),
+          getActionItems(meetingId),
+        ]);
+
+        if (!mounted) return;
+
+        setMeetingData((current) => {
+          const transcriptLines = transcript?.segments?.length
+            ? transcript.segments.map((segment: { speakerName?: string; text: string; startTime?: number }, index: number) => ({
+                speaker: segment.speakerName || 'Speaker',
+                time:
+                  segment.startTime !== undefined
+                    ? `${Math.floor(segment.startTime / 60)}:${Math.floor(segment.startTime % 60)
+                        .toString()
+                        .padStart(2, '0')}`
+                    : `0:${index.toString().padStart(2, '0')}`,
+                text: segment.text,
+              }))
+            : current.transcript;
+
+          return {
+            ...current,
+            id: meetingId,
+            summary: summary?.summary || current.summary,
+            keyPoints: summary?.keyPoints?.length ? summary.keyPoints : current.keyPoints,
+            transcript: transcriptLines,
+            actionItems: actionItems.length
+              ? actionItems.map((item) => ({
+                  id: item._id,
+                  text: item.text,
+                  assigneeName: item.assigneeName || 'Unassigned',
+                  assignee: { name: item.assigneeName || 'Unassigned', avatar: '' },
+                  due: item.dueDate ? format(new Date(item.dueDate), 'MMM d') : 'TBD',
+                  priority: item.priority,
+                  status: item.status === 'completed' ? 'done' : item.status,
+                }))
+              : current.actionItems,
+            stats: summary
+              ? {
+                  ...current.stats,
+                  sentiment: summary.sentiment || current.stats.sentiment,
+                  engagementScore: summary.engagementScore || current.stats.engagementScore,
+                  aiConfidence: summary.status === 'completed' ? 98 : current.stats.aiConfidence,
+                }
+              : current.stats,
+          };
+        });
+
+        setCheckedItems(
+          actionItems
+            .filter((item) => item.status === 'completed')
+            .map((item) => item._id)
+        );
+      } catch (error) {
+        console.error('[post-meeting] failed to load AI analysis', error);
+      }
+    }
+
+    void loadAnalysis();
+
+    return () => {
+      mounted = false;
+    };
+  }, [meetingId]);
 
   const toggleActionItem = (id: string) => {
     setCheckedItems((prev) =>
@@ -415,12 +497,12 @@ export default function PostMeetingPage() {
                       <div className="flex items-center gap-3 mt-2">
                         <div className="flex items-center gap-1.5">
                           <Avatar className="w-5 h-5">
-                            <AvatarFallback className="bg-indigo-600 text-white text-[10px]">
-                              {item.assignee.name.charAt(0)}
-                            </AvatarFallback>
+                              <AvatarFallback className="bg-indigo-600 text-white text-[10px]">
+                                {(item.assignee?.name || item.assigneeName || 'U').charAt(0)}
+                              </AvatarFallback>
                           </Avatar>
                           <span className="text-xs text-gray-400">
-                            {item.assignee.name}
+                            {item.assignee?.name || item.assigneeName || 'Unassigned'}
                           </span>
                         </div>
                         <span className="text-gray-600 text-xs">•</span>

@@ -23,6 +23,8 @@ Node.js (ESM), Express, Socket.IO, MongoDB + Mongoose, JWT access tokens, opaque
 - Node.js 18+
 - MongoDB 6+
 - Redis (optional: set `REDIS_DISABLED=true` in `.env` to skip; caching and access-token blacklist are degraded)
+- OpenAI API key for Whisper/GPT meeting analysis
+- Hugging Face API key for sentiment and inference
 - Cloudinary account (optional until you configure uploads)
 - Groq API key (optional; summary/action endpoints use a simple local fallback without it)
 

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Mic, MicOff, Pin, MoreVertical } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -9,7 +10,8 @@ interface VideoTileProps {
   isSpeaking?: boolean;
   isLocal?: boolean;
   isPinned?: boolean;
-  videoRef?: React.RefObject<HTMLVideoElement>;
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
+  stream?: MediaStream | null;
 }
 
 export default function VideoTile({
@@ -20,7 +22,18 @@ export default function VideoTile({
   isLocal = false,
   isPinned = false,
   videoRef,
+  stream,
 }: VideoTileProps) {
+  const internalVideoRef = useRef<HTMLVideoElement>(null);
+  const resolvedRef = videoRef ?? internalVideoRef;
+
+  useEffect(() => {
+    const videoElement = resolvedRef.current;
+    if (!videoElement || !stream) return;
+
+    videoElement.srcObject = stream;
+  }, [resolvedRef, stream]);
+
   return (
     <div
       className={cn(
@@ -32,7 +45,15 @@ export default function VideoTile({
       {/* Video Element */}
       {!isVideoOff && videoRef ? (
         <video
-          ref={videoRef}
+          ref={resolvedRef}
+          autoPlay
+          playsInline
+          muted={isLocal}
+          className="w-full h-full object-cover"
+        />
+      ) : !isVideoOff && stream ? (
+        <video
+          ref={resolvedRef}
           autoPlay
           playsInline
           muted={isLocal}

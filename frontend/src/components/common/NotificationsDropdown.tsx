@@ -6,6 +6,11 @@ import { useState, useRef, useEffect } from "react";
 import { Notification } from "@/types";
 
 const typeConfig = {
+  system: {
+    icon: Bell,
+    color: "text-sky-400",
+    bg: "bg-sky-500/10",
+  },
   mention: {
     icon: MessageSquare,
     color: "text-purple-400",

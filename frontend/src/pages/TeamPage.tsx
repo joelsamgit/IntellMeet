@@ -142,7 +142,7 @@ export default function TeamPage() {
               },
               {
                 label: "Offline",
-                count: teamMembers.filter((m) => m.status === "offline").length,
+                count: 0,
                 color: "bg-gray-500",
               },
             ].map((s) => (
