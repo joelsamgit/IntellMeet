@@ -10,6 +10,7 @@ import { setNotificationSocket, notifyUsers } from "./notification.service.js";
 import { isJtiBlacklisted } from "./cache.service.js";
 
 const liveParticipants = new Map();
+const SOCKET_BUILD_TAG = "socket-service-2026-06-01-hoppscotch-meeting-lookup";
 
 function parseAllowedOrigins() {
   const raw = process.env.CLIENT_URL || "http://localhost:5173,http://127.0.0.1:5173";
@@ -61,9 +62,24 @@ function participantPayload(user, socketId) {
 
 async function getAccessibleMeeting(meetingId, socket) {
   const idOrCode = String(meetingId || "").trim();
-  const meeting = mongoose.Types.ObjectId.isValid(idOrCode)
-    ? await Meeting.findById(idOrCode)
-    : await Meeting.findOne({ meetingCode: idOrCode.toLowerCase() });
+  if (!idOrCode) {
+    throw new Error("meetingId is required");
+  }
+  const query = mongoose.Types.ObjectId.isValid(idOrCode)
+    ? { $or: [{ _id: new mongoose.Types.ObjectId(idOrCode) }, { meetingCode: idOrCode.toLowerCase() }] }
+    : { meetingCode: idOrCode.toLowerCase() };
+  const meeting = await Meeting.findOne(query);
+  if (process.env.NODE_ENV !== "production") {
+    console.info("[Socket.IO meeting lookup]", {
+      meetingId: idOrCode,
+      query,
+      found: Boolean(meeting),
+      userId: String(socket.user?._id || ""),
+      role: socket.user?.role,
+      db: mongoose.connection.name,
+      host: mongoose.connection.host,
+    });
+  }
   if (!meeting) {
     throw new Error("Meeting not found");
   }
@@ -85,6 +101,25 @@ function extractToken(socket) {
     socket.handshake.query?.token ||
     (typeof authHeader === "string" ? authHeader.replace(/^Bearer\s+/i, "") : "")
   );
+}
+
+function normalizePayload(data) {
+  if (Array.isArray(data)) {
+    return normalizePayload(data[0]);
+  }
+  if (typeof data === "string") {
+    try {
+      return normalizePayload(JSON.parse(data));
+    } catch {
+      return {};
+    }
+  }
+  if (data && typeof data === "object") {
+    if (data.data && typeof data.data === "object") return normalizePayload(data.data);
+    if (data.message && typeof data.message === "object") return normalizePayload(data.message);
+    return data;
+  }
+  return {};
 }
 
 function addParticipant(meetingId, socket) {
@@ -112,6 +147,10 @@ function removeParticipant(socket) {
 
 async function joinMeeting(io, socket, data = {}, ack) {
   try {
+    data = normalizePayload(data);
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[Socket.IO meeting:join payload]", data);
+    }
     const { meetingId } = data;
     const meeting = await getAccessibleMeeting(meetingId, socket);
     const id = String(meeting._id);
@@ -141,6 +180,7 @@ async function joinMeeting(io, socket, data = {}, ack) {
 }
 
 function leaveMeeting(io, socket, data = {}, ack) {
+  data = normalizePayload(data);
   const id = String(data.meetingId || "");
   if (!id) {
     ack?.({ ok: false, success: false, message: "meetingId is required", error: "meetingId is required" });
@@ -169,6 +209,7 @@ function leaveMeeting(io, socket, data = {}, ack) {
 
 async function sendChatMessage(io, socket, data = {}, ack) {
   try {
+    data = normalizePayload(data);
     const meetingId = data.meetingId;
     const message = data.message || data.content || data.text;
     await getAccessibleMeeting(meetingId, socket);
@@ -201,6 +242,7 @@ async function sendChatMessage(io, socket, data = {}, ack) {
 
 async function forwardSignal(socket, eventName, data = {}, ack) {
   try {
+    data = normalizePayload(data);
     const meetingId = data.meetingId;
     await getAccessibleMeeting(meetingId, socket);
     const to = data.to || data.targetSocketId;
@@ -233,6 +275,7 @@ async function forwardSignal(socket, eventName, data = {}, ack) {
 
 async function toggleScreenShare(socket, data = {}, isStarting, ack) {
   try {
+    data = normalizePayload(data);
     const meeting = await getAccessibleMeeting(data.meetingId, socket);
     const id = String(meeting._id);
     const user = participantPayload(socket.user, socket.id);
@@ -267,6 +310,7 @@ async function toggleScreenShare(socket, data = {}, isStarting, ack) {
 }
 
 export function initializeSocket(server) {
+  console.log(`[Socket.IO] Initializing ${SOCKET_BUILD_TAG}`);
   const io = new Server(server, {
     cors: {
       origin: socketCorsOrigin,
@@ -300,12 +344,20 @@ export function initializeSocket(server) {
   setNotificationSocket(io);
 
   io.on("connection", (socket) => {
+    console.log("[Socket.IO] Connected", {
+      build: SOCKET_BUILD_TAG,
+      socketId: socket.id,
+      userId: String(socket.user._id),
+      email: socket.user.email,
+    });
     socket.emit("socket:connected", {
+      build: SOCKET_BUILD_TAG,
       socketId: socket.id,
       userId: String(socket.user._id),
       user: participantPayload(socket.user, socket.id),
     });
     socket.emit("connected", {
+      build: SOCKET_BUILD_TAG,
       socketId: socket.id,
       userId: String(socket.user._id),
       user: participantPayload(socket.user, socket.id),
