@@ -1,4 +1,5 @@
 import { Server } from "socket.io";
+import mongoose from "mongoose";
 import { verifyAccessToken } from "../utils/jwt.js";
 import User from "../models/User.js";
 import Meeting from "../models/Meeting.js";
@@ -18,6 +19,7 @@ function parseAllowedOrigins() {
 function isAllowedDevOrigin(origin) {
   if (!origin) return true;
   if (process.env.NODE_ENV === "production") return false;
+  if (origin === "app://hoppscotch") return true;
   try {
     const url = new URL(origin);
     const localHost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
@@ -25,7 +27,8 @@ function isAllowedDevOrigin(origin) {
     return (
       (localHost && ["http:", "https:", "ws:", "wss:"].includes(url.protocol)) ||
       hoppscotch ||
-      url.protocol === "chrome-extension:"
+      url.protocol === "chrome-extension:" ||
+      url.protocol === "app:"
     );
   } catch {
     return false;
@@ -57,9 +60,15 @@ function participantPayload(user, socketId) {
 }
 
 async function getAccessibleMeeting(meetingId, socket) {
-  const meeting = await Meeting.findById(meetingId);
-  if (!meeting || !canAccessMeeting(meeting, socket.user._id, socket.user.role)) {
+  const idOrCode = String(meetingId || "").trim();
+  const meeting = mongoose.Types.ObjectId.isValid(idOrCode)
+    ? await Meeting.findById(idOrCode)
+    : await Meeting.findOne({ meetingCode: idOrCode.toLowerCase() });
+  if (!meeting) {
     throw new Error("Meeting not found");
+  }
+  if (!canAccessMeeting(meeting, socket.user._id, socket.user.role)) {
+    throw new Error("Access denied for this meeting");
   }
   return meeting;
 }
