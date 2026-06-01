@@ -6,12 +6,39 @@ import Chat from "../models/Chat.js";
 import { canAccessMeeting } from "../utils/access.js";
 import { serializeChatMessage } from "../controllers/chat.controller.js";
 import { setNotificationSocket, notifyUsers } from "./notification.service.js";
+import { isJtiBlacklisted } from "./cache.service.js";
 
 const liveParticipants = new Map();
 
 function parseAllowedOrigins() {
   const raw = process.env.CLIENT_URL || "http://localhost:5173,http://127.0.0.1:5173";
   return [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
+}
+
+function isAllowedDevOrigin(origin) {
+  if (!origin) return true;
+  if (process.env.NODE_ENV === "production") return false;
+  try {
+    const url = new URL(origin);
+    const localHost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    const hoppscotch = url.hostname === "hoppscotch.io" || url.hostname.endsWith(".hoppscotch.io");
+    return (
+      (localHost && ["http:", "https:", "ws:", "wss:"].includes(url.protocol)) ||
+      hoppscotch ||
+      url.protocol === "chrome-extension:"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function socketCorsOrigin(origin, callback) {
+  const allowed = parseAllowedOrigins();
+  if (!origin || allowed.includes(origin) || isAllowedDevOrigin(origin)) {
+    return callback(null, true);
+  }
+  console.warn(`[Socket.IO CORS] Blocked origin: ${origin}`);
+  return callback(null, false);
 }
 
 function meetingRoom(meetingId) {
@@ -37,6 +64,20 @@ async function getAccessibleMeeting(meetingId, socket) {
   return meeting;
 }
 
+function extractToken(socket) {
+  const authHeader =
+    socket.handshake.headers?.authorization ||
+    socket.handshake.headers?.Authorization ||
+    socket.handshake.auth?.authorization ||
+    socket.handshake.auth?.Authorization;
+
+  return (
+    socket.handshake.auth?.token ||
+    socket.handshake.query?.token ||
+    (typeof authHeader === "string" ? authHeader.replace(/^Bearer\s+/i, "") : "")
+  );
+}
+
 function addParticipant(meetingId, socket) {
   const key = String(meetingId);
   if (!liveParticipants.has(key)) liveParticipants.set(key, new Map());
@@ -60,144 +101,247 @@ function removeParticipant(socket) {
   }
 }
 
+async function joinMeeting(io, socket, data = {}, ack) {
+  try {
+    const { meetingId } = data;
+    const meeting = await getAccessibleMeeting(meetingId, socket);
+    const id = String(meeting._id);
+    socket.join(meetingRoom(id));
+    addParticipant(id, socket);
+    const participants = [...liveParticipants.get(id).values()];
+    const participant = participantPayload(socket.user, socket.id);
+
+    socket.to(meetingRoom(id)).emit("participant:joined", {
+      meetingId: id,
+      participant,
+    });
+    socket.to(meetingRoom(id)).emit("user-joined", {
+      meetingId: id,
+      userId: String(socket.user._id),
+      user: participant,
+      socketId: socket.id,
+      participants,
+      timestamp: Date.now(),
+    });
+    socket.emit("room-participants", { meetingId: id, participants });
+    io.to(meetingRoom(id)).emit("participants:update", { meetingId: id, participants });
+    ack?.({ ok: true, success: true, meetingId: id, roomId: meetingRoom(id), participants });
+  } catch (err) {
+    ack?.({ ok: false, success: false, message: err.message, error: err.message });
+  }
+}
+
+function leaveMeeting(io, socket, data = {}, ack) {
+  const id = String(data.meetingId || "");
+  if (!id) {
+    ack?.({ ok: false, success: false, message: "meetingId is required", error: "meetingId is required" });
+    return;
+  }
+  socket.leave(meetingRoom(id));
+  liveParticipants.get(id)?.delete(socket.id);
+  const participants = [...(liveParticipants.get(id)?.values() || [])];
+  if (participants.length === 0) liveParticipants.delete(id);
+
+  const payload = {
+    meetingId: id,
+    socketId: socket.id,
+    userId: String(socket.user._id),
+  };
+  socket.to(meetingRoom(id)).emit("participant:left", payload);
+  socket.to(meetingRoom(id)).emit("user-left", {
+    ...payload,
+    user: participantPayload(socket.user, socket.id),
+    participants,
+    timestamp: Date.now(),
+  });
+  io.to(meetingRoom(id)).emit("participants:update", { meetingId: id, participants });
+  ack?.({ ok: true, success: true, participants });
+}
+
+async function sendChatMessage(io, socket, data = {}, ack) {
+  try {
+    const meetingId = data.meetingId;
+    const message = data.message || data.content || data.text;
+    await getAccessibleMeeting(meetingId, socket);
+    const chat = await Chat.create({
+      meeting: meetingId,
+      sender: socket.user._id,
+      message,
+      attachments: data.attachments || [],
+    });
+    const populated = await Chat.findById(chat._id).populate("sender", "name email role avatar");
+    const payload = serializeChatMessage(populated);
+    io.to(meetingRoom(String(meetingId))).emit("chat:message", payload);
+    io.to(meetingRoom(String(meetingId))).emit("receive-message", {
+      _id: String(payload._id),
+      meetingId: String(payload.meeting),
+      senderId: String(payload.sender?._id || ""),
+      senderName: payload.sender?.name,
+      senderAvatar: payload.sender?.avatar,
+      text: payload.message,
+      content: payload.message,
+      type: payload.kind || "text",
+      timestamp: payload.createdAt,
+      clientMessageId: data.clientMessageId,
+    });
+    ack?.({ ok: true, success: true, message: payload });
+  } catch (err) {
+    ack?.({ ok: false, success: false, message: err.message, error: err.message });
+  }
+}
+
+async function forwardSignal(socket, eventName, data = {}, ack) {
+  try {
+    const meetingId = data.meetingId;
+    await getAccessibleMeeting(meetingId, socket);
+    const to = data.to || data.targetSocketId;
+    if (!to) throw new Error("target socket id is required");
+    const payload = {
+      meetingId,
+      from: socket.id,
+      fromUserId: String(socket.user._id),
+      fromUserName: socket.user.name,
+    };
+    if (eventName === "signal:offer") payload.offer = data.offer;
+    if (eventName === "signal:answer") payload.answer = data.answer;
+    if (eventName === "signal:ice-candidate") payload.candidate = data.candidate;
+    socket.to(to).emit(eventName, payload);
+    const aliasEvent =
+      eventName === "signal:offer"
+        ? "offer"
+        : eventName === "signal:answer"
+          ? "answer"
+          : "ice-candidate";
+    socket.to(to).emit(aliasEvent, {
+      ...payload,
+      targetSocketId: to,
+    });
+    ack?.({ ok: true, success: true });
+  } catch (err) {
+    ack?.({ ok: false, success: false, message: err.message, error: err.message });
+  }
+}
+
+async function toggleScreenShare(socket, data = {}, isStarting, ack) {
+  try {
+    const meeting = await getAccessibleMeeting(data.meetingId, socket);
+    const id = String(meeting._id);
+    const user = participantPayload(socket.user, socket.id);
+    if (isStarting) {
+      socket.to(meetingRoom(id)).emit("screen-share:started", { meetingId: id, user });
+      socket.to(meetingRoom(id)).emit("screen-share-start", {
+        meetingId: id,
+        userId: String(socket.user._id),
+        userName: socket.user.name,
+        socketId: socket.id,
+      });
+      await notifyUsers(meeting.participants, {
+        type: "screen_share",
+        meeting: meeting._id,
+        message: `${socket.user.name} started screen sharing in ${meeting.title}`,
+      });
+    } else {
+      socket.to(meetingRoom(id)).emit("screen-share:stopped", {
+        meetingId: id,
+        userId: String(socket.user._id),
+      });
+      socket.to(meetingRoom(id)).emit("screen-share-stop", {
+        meetingId: id,
+        userId: String(socket.user._id),
+        socketId: socket.id,
+      });
+    }
+    ack?.({ ok: true, success: true });
+  } catch (err) {
+    ack?.({ ok: false, success: false, message: err.message, error: err.message });
+  }
+}
+
 export function initializeSocket(server) {
   const io = new Server(server, {
     cors: {
-      origin: parseAllowedOrigins(),
+      origin: socketCorsOrigin,
+      methods: ["GET", "POST"],
       credentials: true,
     },
+    transports: ["websocket", "polling"],
+    pingInterval: 25000,
+    pingTimeout: 20000,
+    maxHttpBufferSize: 5e6,
   });
 
   io.use(async (socket, next) => {
     try {
-      const token =
-        socket.handshake.auth?.token ||
-        socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, "");
+      const token = extractToken(socket);
       if (!token) return next(new Error("Not authenticated"));
       const payload = verifyAccessToken(token);
       if (payload.typ !== "access") return next(new Error("Not authenticated"));
+      if (await isJtiBlacklisted(payload.jti)) return next(new Error("Token revoked"));
       const user = await User.findById(payload.sub);
       if (!user) return next(new Error("Not authenticated"));
       socket.user = user;
+      socket.userId = String(user._id);
       socket.join(`user:${String(user._id)}`);
       return next();
-    } catch {
-      return next(new Error("Not authenticated"));
+    } catch (err) {
+      return next(new Error(err.message || "Not authenticated"));
     }
   });
 
   setNotificationSocket(io);
 
   io.on("connection", (socket) => {
-    socket.on("meeting:join", async ({ meetingId }, ack) => {
-      try {
-        const meeting = await getAccessibleMeeting(meetingId, socket);
-        const id = String(meeting._id);
-        socket.join(meetingRoom(id));
-        addParticipant(id, socket);
-        const participants = [...liveParticipants.get(id).values()];
-        socket.to(meetingRoom(id)).emit("participant:joined", {
-          meetingId: id,
-          participant: participantPayload(socket.user, socket.id),
-        });
-        io.to(meetingRoom(id)).emit("participants:update", { meetingId: id, participants });
-        ack?.({ ok: true, participants });
-      } catch (err) {
-        ack?.({ ok: false, message: err.message });
-      }
+    socket.emit("socket:connected", {
+      socketId: socket.id,
+      userId: String(socket.user._id),
+      user: participantPayload(socket.user, socket.id),
+    });
+    socket.emit("connected", {
+      socketId: socket.id,
+      userId: String(socket.user._id),
+      user: participantPayload(socket.user, socket.id),
     });
 
-    socket.on("meeting:leave", ({ meetingId }, ack) => {
-      const id = String(meetingId);
-      socket.leave(meetingRoom(id));
-      liveParticipants.get(id)?.delete(socket.id);
-      const participants = [...(liveParticipants.get(id)?.values() || [])];
-      socket.to(meetingRoom(id)).emit("participant:left", {
-        meetingId: id,
-        socketId: socket.id,
+    socket.on("meeting:join", (data, ack) => joinMeeting(io, socket, data, ack));
+    socket.on("join-room", (data, ack) => joinMeeting(io, socket, data, ack));
+
+    socket.on("meeting:leave", (data, ack) => leaveMeeting(io, socket, data, ack));
+    socket.on("leave-room", (data, ack) => leaveMeeting(io, socket, data, ack));
+
+    socket.on("chat:send", (data, ack) => sendChatMessage(io, socket, data, ack));
+    socket.on("send-message", (data, ack) => sendChatMessage(io, socket, data, ack));
+
+    socket.on("signal:offer", (data, ack) => forwardSignal(socket, "signal:offer", data, ack));
+    socket.on("offer", (data, ack) => {
+      forwardSignal(socket, "signal:offer", { ...data, to: data.to || data.targetSocketId }, ack);
+    });
+
+    socket.on("signal:answer", (data, ack) => forwardSignal(socket, "signal:answer", data, ack));
+    socket.on("answer", (data, ack) => {
+      forwardSignal(socket, "signal:answer", { ...data, to: data.to || data.targetSocketId }, ack);
+    });
+
+    socket.on("signal:ice-candidate", (data, ack) => forwardSignal(socket, "signal:ice-candidate", data, ack));
+    socket.on("ice-candidate", (data, ack) => {
+      forwardSignal(socket, "signal:ice-candidate", { ...data, to: data.to || data.targetSocketId }, ack);
+    });
+
+    socket.on("screen-share:start", (data, ack) => toggleScreenShare(socket, data, true, ack));
+    socket.on("screen-share-start", (data, ack) => toggleScreenShare(socket, data, true, ack));
+
+    socket.on("screen-share:stop", (data, ack) => toggleScreenShare(socket, data, false, ack));
+    socket.on("screen-share-stop", (data, ack) => toggleScreenShare(socket, data, false, ack));
+
+    socket.on("media-state-change", (data = {}) => {
+      if (!data.meetingId || !socket.rooms.has(meetingRoom(String(data.meetingId)))) return;
+      socket.to(meetingRoom(String(data.meetingId))).emit("media-state-change", {
+        meetingId: String(data.meetingId),
         userId: String(socket.user._id),
+        userName: socket.user.name,
+        socketId: socket.id,
+        audio: data.audio,
+        video: data.video,
       });
-      io.to(meetingRoom(id)).emit("participants:update", { meetingId: id, participants });
-      ack?.({ ok: true });
-    });
-
-    socket.on("chat:send", async ({ meetingId, message, attachments }, ack) => {
-      try {
-        await getAccessibleMeeting(meetingId, socket);
-        const chat = await Chat.create({
-          meeting: meetingId,
-          sender: socket.user._id,
-          message,
-          attachments: attachments || [],
-        });
-        const populated = await Chat.findById(chat._id).populate("sender", "name email role avatar");
-        const payload = serializeChatMessage(populated);
-        io.to(meetingRoom(String(meetingId))).emit("chat:message", payload);
-        ack?.({ ok: true, message: payload });
-      } catch (err) {
-        ack?.({ ok: false, message: err.message });
-      }
-    });
-
-    socket.on("signal:offer", async ({ meetingId, to, offer }, ack) => {
-      try {
-        await getAccessibleMeeting(meetingId, socket);
-        io.to(to).emit("signal:offer", { meetingId, from: socket.id, offer });
-        ack?.({ ok: true });
-      } catch (err) {
-        ack?.({ ok: false, message: err.message });
-      }
-    });
-
-    socket.on("signal:answer", async ({ meetingId, to, answer }, ack) => {
-      try {
-        await getAccessibleMeeting(meetingId, socket);
-        io.to(to).emit("signal:answer", { meetingId, from: socket.id, answer });
-        ack?.({ ok: true });
-      } catch (err) {
-        ack?.({ ok: false, message: err.message });
-      }
-    });
-
-    socket.on("signal:ice-candidate", async ({ meetingId, to, candidate }, ack) => {
-      try {
-        await getAccessibleMeeting(meetingId, socket);
-        io.to(to).emit("signal:ice-candidate", { meetingId, from: socket.id, candidate });
-        ack?.({ ok: true });
-      } catch (err) {
-        ack?.({ ok: false, message: err.message });
-      }
-    });
-
-    socket.on("screen-share:start", async ({ meetingId }, ack) => {
-      try {
-        const meeting = await getAccessibleMeeting(meetingId, socket);
-        socket.to(meetingRoom(String(meetingId))).emit("screen-share:started", {
-          meetingId,
-          user: participantPayload(socket.user, socket.id),
-        });
-        await notifyUsers(meeting.participants, {
-          type: "screen_share",
-          meeting: meeting._id,
-          message: `${socket.user.name} started screen sharing in ${meeting.title}`,
-        });
-        ack?.({ ok: true });
-      } catch (err) {
-        ack?.({ ok: false, message: err.message });
-      }
-    });
-
-    socket.on("screen-share:stop", async ({ meetingId }, ack) => {
-      try {
-        await getAccessibleMeeting(meetingId, socket);
-        socket.to(meetingRoom(String(meetingId))).emit("screen-share:stopped", {
-          meetingId,
-          userId: String(socket.user._id),
-        });
-        ack?.({ ok: true });
-      } catch (err) {
-        ack?.({ ok: false, message: err.message });
-      }
     });
 
     socket.on("disconnect", () => {
