@@ -1,383 +1,454 @@
 # IntellMeet Backend
 
-Production-oriented REST API for **IntellMeet** (authentication, users, meetings, teams, tasks, notifications, chat, sockets, and AI meeting helpers). Built to match the existing Vite + React frontend in this repo.
+REST API + real-time Socket.IO server for the IntellMeet platform.
+Covers auth, users, meetings, teams, tasks, notifications, chat, WebRTC signaling, and AI post-meeting processing.
 
-## Frontend alignment
+**Base URL:** `http://localhost:5000/api`  
+**Socket URL:** `http://localhost:5000` (not `/api`)  
+**Health check:** `GET /api/health` → `{ ok: true }`
 
-| Frontend | Backend |
-|----------|---------|
-| `VITE_API_URL` default `http://localhost:5000/api` | All routes mounted under `/api` |
-| `POST /auth/login`, `POST /auth/signup` | Same paths; `POST /auth/register` is an alias for signup |
-| Login/signup response `{ user, token }` | Access JWT in JSON; refresh token in **HTTP-only** cookie `refreshToken` (path `/api/auth`) |
-| `withCredentials: true` | CORS `credentials: true` and `CLIENT_URL` origin |
-| `Authorization: Bearer <token>` | Required on protected routes |
+---
 
-Meeting list/detail payloads follow `frontend/src/types/index.ts` (`startTime`, `hostId`, `participants`, `actionItems`, etc.).
-
-## Tech stack
-
-Node.js (ESM), Express, Socket.IO, MongoDB + Mongoose, JWT access tokens, opaque refresh tokens (hashed in DB), bcrypt, Redis (cache + session + token blacklist), Cloudinary (avatars + attachments), optional Groq summaries/action extraction, Helmet, express-rate-limit, cookie-parser, cors, multer, express-validator.
-
-## Prerequisites
-
-- Node.js 18+
-- MongoDB 6+
-- Redis (optional: set `REDIS_DISABLED=true` in `.env` to skip; caching and access-token blacklist are degraded)
-- OpenAI API key for Whisper/GPT meeting analysis
-- Hugging Face API key for sentiment and inference
-- Cloudinary account (optional until you configure uploads)
-- Groq API key (optional; summary/action endpoints use a simple local fallback without it)
-
-## Setup
+## Quick start
 
 ```bash
-cd backend
-cp .env.example .env
-# Edit .env — set MONGODB_URI, JWT_ACCESS_SECRET, and optionally Redis + Cloudinary + Groq
+cp .env.example .env   # fill in MONGODB_URI, JWT_ACCESS_SECRET, GROQ_API_KEY
 npm install
 npm run dev
 ```
 
-API base: `http://localhost:5000/api`  
-Health: `GET http://localhost:5000/api/health`
+---
 
-## Environment variables
+## Auth
 
-See `.env.example` for descriptions. **Never commit real secrets**; keep them in `.env` (ignored by git).
-
-For AI summaries/action items, set:
-
-```bash
-GROQ_API_KEY=your_groq_key
-GROQ_MODEL=llama-3.1-8b-instant
+Every protected route requires:
+```
+Authorization: Bearer <accessToken>
 ```
 
-## API overview
+Access token lifetime is set by `JWT_ACCESS_EXPIRES` in `.env` (code default `15m`). Use the refresh endpoint to get a new one — the server sets and reads the refresh token via an HTTP-only cookie automatically.
 
-### Auth (`/api/auth`)
+Always call APIs with `credentials: "include"` (or `withCredentials: true` in axios) so the refresh cookie is sent.
 
-- `POST /register` — same body as signup  
-- `POST /signup` — `{ name, email, password }` → `{ user, token }` + refresh cookie  
-- `POST /login` — `{ email, password }`  
-- `POST /logout` — Bearer required; clears refresh cookie + server session  
-- `POST /refresh-token` — uses refresh cookie → new access + refresh  
-- `POST /forgot-password` — `{ email }` (in dev, reset URL is logged and may be returned)  
-- `POST /reset-password` — `{ email, token, password }`  
-- `PUT /change-password` — Bearer + `{ currentPassword, newPassword }`
+### Endpoints
 
-### Users (`/api/users`, Bearer)
+| Method | Path | Auth | Body | Response |
+|--------|------|------|------|----------|
+| POST | `/api/auth/signup` | — | `{ name, email, password }` | `{ user, token }` + sets `refreshToken` cookie |
+| POST | `/api/auth/register` | — | same as signup | same |
+| POST | `/api/auth/login` | — | `{ email, password }` | `{ user, token }` + sets `refreshToken` cookie |
+| POST | `/api/auth/refresh-token` | cookie | — | `{ token }` + rotates cookie |
+| POST | `/api/auth/logout` | Bearer | — | `{ message }` + clears cookie |
+| POST | `/api/auth/forgot-password` | — | `{ email }` | `{ message }` |
+| POST | `/api/auth/reset-password` | — | `{ email, token, password }` | `{ message }` |
+| PUT | `/api/auth/change-password` | Bearer | `{ currentPassword, newPassword }` | `{ message }` |
 
-- `GET /profile`  
-- `PUT /profile` — `{ name?, bio?, email? }`  
-- `POST /avatar` — `multipart/form-data` field `avatar`  
-- `GET /all` — **admin only**
+**User object shape** (returned on login/signup):
+```json
+{
+  "_id": "...",
+  "name": "Rahul",
+  "email": "rahul@example.com",
+  "avatar": "https://...",
+  "role": "admin | member",
+  "bio": "..."
+}
+```
 
-### Meetings (`/api/meetings`, Bearer)
+---
 
-- `POST /create` — body includes `title`, `scheduledTime` (ISO), optional `description`, `participantIds`, `status`  
-- `GET /` — meetings where user is host or participant (admins see all)  
-- `GET /:id` — MongoDB `_id` or `meetingCode`  
-- `PUT /:id`, `DELETE /:id` — host or admin  
+## Users
 
-### Teams (`/api/teams`, Bearer)
+All routes require Bearer token.
 
-Full CRUD: `POST /`, `GET /`, `GET /:id`, `PUT /:id`, `DELETE /:id`.
+| Method | Path | Body / Params | Notes |
+|--------|------|---------------|-------|
+| GET | `/api/users/profile` | — | Returns logged-in user |
+| PUT | `/api/users/profile` | `{ name?, bio?, email? }` | Updates profile |
+| POST | `/api/users/avatar` | `multipart/form-data` field: `avatar` | Uploads to Cloudinary |
+| GET | `/api/users/all` | — | Admin only |
 
-### Tasks (`/api/tasks`, Bearer)
+---
 
-Full CRUD: `POST /`, `GET /?teamId=`, `GET /:id`, `PUT /:id`, `DELETE /:id`.
+## Meetings
 
-### Notifications (`/api/notifications`, Bearer)
+All routes require Bearer token.
 
-- `GET /` — maps `isRead` → `read` in JSON for the UI  
-- `PATCH /:id/read`  
-- `POST /mark-all-read`
+| Method | Path | Body / Params | Notes |
+|--------|------|---------------|-------|
+| POST | `/api/meetings/create` | `{ title, scheduledTime (ISO), description?, participantIds?, status? }` | Creates meeting, returns meeting object |
+| GET | `/api/meetings` | — | Lists meetings where user is host or participant |
+| GET | `/api/meetings/:id` | — | `:id` can be MongoDB `_id` or `meetingCode` |
+| PUT | `/api/meetings/:id` | same fields as create | Host or admin only |
+| DELETE | `/api/meetings/:id` | — | Host or admin only |
 
-### Chat (`/api/chat`, Bearer)
+**Meeting object shape** (as returned by all meeting endpoints — see `src/utils/meetingSerializer.js`):
+```json
+{
+  "_id": "...",
+  "title": "Sprint Review",
+  "meetingCode": "abc-123",
+  "startTime": "2026-06-01T10:00:00.000Z",
+  "endTime": "2026-06-01T11:00:00.000Z",
+  "status": "scheduled | live | ended",
+  "hostId": "64f...",
+  "participants": [{ "_id": "...", "name": "...", "email": "...", "role": "...", "avatar": "..." }],
+  "summary": "...",
+  "recording": "https://...",
+  "actionItems": [{ "_id": "...", "text": "...", "status": "pending | done", "assignee": { "_id": "...", "name": "..." }, "meetingId": "..." }]
+}
+```
 
-- `GET /meetings/:meetingId/messages?limit=50` — list meeting chat history  
-- `POST /meetings/:meetingId/messages` — `{ message, attachments? }`
+> `summary`, `recording`, and `endTime` are omitted from the response when not set. `actionItems` is always present (empty array if none).  
+> Note: `hostId` is a plain string ID — fetch the user separately via `GET /api/users/all` if you need the host's full profile.
 
-### AI meeting helpers (`/api/ai`, Bearer)
+---
 
-- `POST /meetings/:meetingId/transcribe` — `{ text | transcript }` placeholder endpoint for transcript ingestion  
-- `POST /meetings/:meetingId/summary` — stores and returns `{ summary }`  
-- `POST /meetings/:meetingId/action-items` — extracts action items into the meeting  
-- `POST /meetings/:meetingId/tasks` — creates task records from provided or stored action items
+## Teams
 
-### Upload (`/api/upload`, Bearer)
+All routes require Bearer token.
 
-- `POST /attachment` — field `file`; optional `meetingId` (form field) to append to meeting `attachments`
+| Method | Path | Body | Notes |
+|--------|------|------|-------|
+| POST | `/api/teams` | `{ name, members?, projects? }` | Creates team |
+| GET | `/api/teams` | — | Teams the user belongs to |
+| GET | `/api/teams/:id` | — | Single team |
+| PUT | `/api/teams/:id` | `{ name?, members?, projects? }` | Update team |
+| DELETE | `/api/teams/:id` | — | Delete team |
 
-## Socket.IO events
+---
 
-Connect to the API server URL with auth:
+## Tasks
+
+All routes require Bearer token.
+
+| Method | Path | Body / Query | Notes |
+|--------|------|--------------|-------|
+| POST | `/api/tasks` | `{ title, description?, assignee?, team?, priority?, status?, dueDate? }` | Creates task, notifies assignee |
+| GET | `/api/tasks` | `?teamId=` (optional) | Lists tasks; filter by team |
+| GET | `/api/tasks/:id` | — | Single task |
+| PUT | `/api/tasks/:id` | same fields as create | Update task |
+| DELETE | `/api/tasks/:id` | — | Delete task |
+
+`priority`: `"low" | "medium" | "high"`  
+`status`: `"todo" | "in_progress" | "done"`
+
+---
+
+## Notifications
+
+All routes require Bearer token.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/api/notifications` | Returns `{ notifications: [{ _id, type, message, read, meeting?, task?, createdAt }] }` |
+| PATCH | `/api/notifications/:id/read` | Marks one as read |
+| POST | `/api/notifications/mark-all-read` | Marks all as read |
+
+Notifications are created automatically for: task assignment, action item tasks, meeting summary ready, and screen share start.
+
+---
+
+## Chat (REST)
+
+All routes require Bearer token. For real-time chat use the socket event below.
+
+| Method | Path | Body / Query | Notes |
+|--------|------|--------------|-------|
+| GET | `/api/chat/meetings/:meetingId/messages` | `?limit=50` | Fetch chat history |
+| POST | `/api/chat/meetings/:meetingId/messages` | `{ message, attachments? }` | Post a message (persisted) |
+
+---
+
+## AI — Post-meeting pipeline
+
+All routes require Bearer token. Uses **Groq** (`whisper-large-v3-turbo` for transcription, configurable model for summary/action items).
+
+### One-shot endpoint (recommended for post-meeting flow)
+
+**`POST /api/ai/meetings/:meetingId/process`**
+
+Accepts an audio file **or** raw transcript text. Runs the full pipeline in one request:
+transcribe → summarize → extract action items → saves to meeting → notifies participants.
+
+```
+multipart/form-data  field: audio  (mp3, wav, webm, flac, m4a, ogg — max 25 MB)
+```
+or
+```json
+{ "transcript": "raw text..." }
+```
+
+Response:
+```json
+{
+  "transcript": "Rahul will fix auth...",
+  "summary": "The team discussed...",
+  "actionItems": [
+    { "_id": "...", "text": "Fix auth bug", "status": "pending" }
+  ]
+}
+```
+
+Also marks the meeting `status: "ended"` and sets `endTime`.
+
+### Individual endpoints
+
+| Method | Path | Body | Notes |
+|--------|------|------|-------|
+| POST | `/api/ai/meetings/:meetingId/transcribe` | `multipart audio` or `{ text }` | Returns `{ transcript }` only, does not persist |
+| POST | `/api/ai/meetings/:meetingId/summary` | `{ transcript }` | Generates + saves summary, notifies participants |
+| POST | `/api/ai/meetings/:meetingId/action-items` | `{ transcript }` | Extracts + appends action items to meeting |
+| POST | `/api/ai/meetings/:meetingId/tasks` | `{ items? }` | Creates Task records from stored action items |
+
+---
+
+## File upload
+
+Bearer token required.
+
+| Method | Path | Body | Notes |
+|--------|------|------|-------|
+| POST | `/api/upload/attachment` | `multipart/form-data` field: `file`, optional field: `meetingId` | Uploads to Cloudinary; if `meetingId` provided, appends URL to meeting attachments |
+
+---
+
+## Socket.IO
+
+Connect to the **root server URL** (not `/api`):
 
 ```js
-io("http://localhost:5000", {
-  auth: { token: accessToken },
+import { io } from "socket.io-client";
+
+const socket = io("http://localhost:5000", {
+  auth: { token: accessToken },   // your JWT access token
   withCredentials: true,
+});
+
+socket.on("connected", ({ userId, socketId }) => {
+  console.log("socket ready", socketId);
 });
 ```
 
-Client emits:
+On connect the server joins you to your personal room `user:{userId}` for notifications.
 
-- `meeting:join` / `meeting:leave` — `{ meetingId }`
-- `chat:send` — `{ meetingId, message, attachments? }`
-- `signal:offer`, `signal:answer`, `signal:ice-candidate` — WebRTC signaling payloads with `{ meetingId, to, ... }`
-- `screen-share:start` / `screen-share:stop` — `{ meetingId }`
+---
 
-Client listens:
+### Meeting room events
 
-- `participants:update`, `participant:joined`, `participant:left`
-- `chat:message`
-- `signal:offer`, `signal:answer`, `signal:ice-candidate`
-- `screen-share:started`, `screen-share:stopped`
-- `notification:new`
+#### Client → Server
+
+```js
+// Join a meeting room (must call before any other meeting events)
+socket.emit("join-room", { meetingId }, (res) => {
+  // res.success, res.participants, res.meeting
+});
+
+// Leave a meeting room
+socket.emit("leave-room", { meetingId }, (res) => {});
+
+// End the meeting (host only) — marks meeting ended in DB
+socket.emit("end-meeting", { meetingId }, (res) => {
+  // res.success
+});
+
+// Request mute for another user
+socket.emit("mute-user", { meetingId, targetUserId });
+
+// Raise / lower hand
+socket.emit("raise-hand", { meetingId });
+socket.emit("lower-hand", { meetingId });
+```
+
+#### Server → Client
+
+```js
+// Bootstrap: full participant list when you join
+socket.on("room-participants", ({ meetingId, participants }) => {});
+
+// Someone joined / left
+socket.on("user-joined", ({ userId, user, socketId, participants, timestamp }) => {});
+socket.on("user-left",   ({ userId, user, socketId, participants, timestamp }) => {});
+
+// Host ended the meeting — navigate all participants away
+socket.on("meeting-ended", ({ meetingId, endedBy, endedByName, timestamp }) => {});
+
+// Host requested mute
+socket.on("force-mute", ({ targetUserId, requestedBy, requestedByName }) => {});
+
+socket.on("hand-raised", ({ userId, userName, timestamp }) => {});
+socket.on("hand-lowered", ({ userId, timestamp }) => {});
+```
+
+**`participants` array shape:**
+```json
+[{ "userId": "...", "name": "Rahul", "socketId": "..." }]
+```
+
+---
+
+### WebRTC signaling events
+
+The server relays signaling payloads between peers. Use `socketId` values from `user-joined` / `room-participants` as `targetSocketId`.
+
+#### Client → Server
+
+```js
+socket.emit("offer",         { targetSocketId, offer, meetingId });
+socket.emit("answer",        { targetSocketId, answer, meetingId });
+socket.emit("ice-candidate", { targetSocketId, candidate, meetingId });
+socket.emit("renegotiate",   { targetSocketId, meetingId });
+
+socket.emit("screen-share-start", { meetingId });
+socket.emit("screen-share-stop",  { meetingId });
+
+// Notify others of mic/camera state
+socket.emit("media-state-change", { meetingId, audio: true, video: false });
+```
+
+#### Server → Client
+
+```js
+socket.on("offer",         ({ offer, from, fromUserId, fromUserName, meetingId }) => {});
+socket.on("answer",        ({ answer, from, fromUserId, meetingId }) => {});
+socket.on("ice-candidate", ({ candidate, from, fromUserId, meetingId }) => {});
+socket.on("renegotiate",   ({ from, fromUserId, meetingId }) => {});
+
+socket.on("screen-share-start", ({ userId, userName, socketId }) => {});
+socket.on("screen-share-stop",  ({ userId, socketId }) => {});
+
+socket.on("media-state-change", ({ userId, userName, socketId, audio, video }) => {});
+```
+
+---
+
+### Chat events
+
+Must be in the meeting room (`join-room` first).
+
+#### Client → Server
+
+```js
+// Send a message (persisted to DB, broadcast to room)
+socket.emit("send-message", { meetingId, content: "hello", type: "text", clientMessageId: "local-uuid" }, (res) => {
+  // res.success, res.message
+});
+
+// Typing indicators
+socket.emit("typing",      { meetingId });
+socket.emit("stop-typing", { meetingId });
+
+// React to a message
+socket.emit("add-reaction", { meetingId, messageId, emoji: "👍" });
+```
+
+#### Server → Client
+
+```js
+socket.on("receive-message", ({ _id, meetingId, senderId, senderName, senderAvatar, text, type, timestamp, clientMessageId }) => {});
+
+socket.on("typing",      ({ userId, userName }) => {});
+socket.on("stop-typing", ({ userId }) => {});
+
+socket.on("reaction-added", ({ messageId, userId, userName, emoji }) => {});
+```
+
+---
+
+### Notification events
+
+#### Server → Client
+
+```js
+// Fired automatically when any backend action creates a notification
+socket.on("notification", ({ _id, type, message, read, createdAt }) => {});
+
+// Fired after mark-notification-read socket call
+socket.on("notification-read", ({ notificationId }) => {});
+```
+
+#### Client → Server (optional, prefer REST)
+
+```js
+socket.emit("send-notification",      { recipientId, type, message });
+socket.emit("mark-notification-read", { notificationId });
+```
+
+---
+
+### Collaboration events
+
+#### Client → Server
+
+```js
+socket.emit("cursor-move",      { meetingId, x, y, element });
+socket.emit("document-edit",    { meetingId, documentId, changes, version });
+socket.emit("meeting-reaction", { meetingId, emoji: "🎉" });
+socket.emit("whiteboard-draw",  { meetingId, drawData });
+socket.emit("whiteboard-clear", { meetingId });
+```
+
+#### Server → Client
+
+```js
+socket.on("cursor-move",      ({ userId, userName, x, y, element }) => {});
+socket.on("document-edit",    ({ userId, userName, documentId, changes, version, timestamp }) => {});
+socket.on("meeting-reaction", ({ userId, userName, emoji, timestamp }) => {});
+socket.on("whiteboard-draw",  ({ userId, userName, drawData }) => {});
+socket.on("whiteboard-clear", ({ userId, userName }) => {});
+```
+
+---
+
+## Post-meeting integration flow (recommended)
+
+```
+1. Host clicks "End meeting"
+   → socket.emit("end-meeting", { meetingId })
+   → all participants receive "meeting-ended" → navigate to summary page
+
+2. Frontend stops MediaRecorder → gets audio Blob (webm/mp3/flac)
+
+3. POST /api/ai/meetings/:meetingId/process
+   with multipart audio field
+   → { transcript, summary, actionItems }
+
+4. Render summary + action items on the post-meeting dashboard
+   (already persisted on the meeting, also available via GET /api/meetings/:id)
+
+5. Optional: POST /api/ai/meetings/:meetingId/tasks
+   to convert action items into Task records with assignees
+```
+
+---
 
 ## Roles
 
-- **admin** — first registered user becomes admin; others default to **member**  
-- Admins may list all users and all meetings; members are scoped to their data where applicable  
+- **admin** — first registered user; can list all users and all meetings
+- **member** — default for all subsequent registrations; scoped to their own data
 
-## Security notes
+---
 
-- Passwords hashed with bcrypt (cost 12)  
-- Refresh tokens are never stored in plain text (SHA-256 hash in DB)  
-- Access token `jti` can be blacklisted in Redis after logout  
-- Helmet + rate limiting + input validation on write routes  
+## Environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MONGODB_URI` | Yes | MongoDB connection string |
+| `JWT_ACCESS_SECRET` | Yes | Secret for signing access tokens |
+| `JWT_ACCESS_EXPIRES` | No | Token lifetime (code default `15m`) |
+| `CLIENT_URL` | Yes | Comma-separated frontend origins for CORS |
+| `GROQ_API_KEY` | Yes | Groq API key (transcription + summary + action items) |
+| `GROQ_MODEL` | No | Groq chat model (default `llama-3.1-8b-instant`) |
+| `CLOUDINARY_CLOUD_NAME` | For uploads | Cloudinary config |
+| `CLOUDINARY_API_KEY` | For uploads | Cloudinary config |
+| `CLOUDINARY_API_SECRET` | For uploads | Cloudinary config |
+| `REDIS_URL` | No | Redis connection (default `redis://127.0.0.1:6379`) |
+| `REDIS_DISABLED` | No | Set `true` to run without Redis |
+| `MAX_FILE_MB` | No | Max upload size in MB (code default `10`, Groq cap is 25) |
 
 ## Scripts
 
-- `npm run dev` — `node --watch src/server.js`  
-- `npm start` — `node src/server.js`
-
-## Implemented additions from our side
-
-This section documents the realtime meeting, chat, notification, task, team/workspace, and AI helper work added on top of the original backend setup.
-
-### Realtime Socket.IO layer
-
-Socket.IO is initialized from `src/server.js` through `src/services/socket.service.js`. Clients connect to the backend root URL, not the `/api` URL:
-
-```js
-io("http://localhost:5000", {
-  auth: { token: accessToken },
-  withCredentials: true,
-});
-```
-
-The socket middleware validates the access JWT, loads the user, joins a per-user notification room, and then allows meeting-scoped events only if the user can access that meeting.
-
-Implemented events:
-
-- `meeting:join` — joins `meeting:{meetingId}` and broadcasts participant updates.
-- `meeting:leave` — leaves the meeting room and broadcasts participant updates.
-- `chat:send` — creates a persisted chat message and emits `chat:message`.
-- `signal:offer`, `signal:answer`, `signal:ice-candidate` — forwards WebRTC signaling payloads to the target socket id.
-- `screen-share:start` — broadcasts `screen-share:started` and creates screen-share notifications.
-- `screen-share:stop` — broadcasts `screen-share:stopped`.
-- `disconnect` — removes the user from live participant maps.
-
-Useful listener events:
-
-- `participants:update`
-- `participant:joined`
-- `participant:left`
-- `chat:message`
-- `signal:offer`
-- `signal:answer`
-- `signal:ice-candidate`
-- `screen-share:started`
-- `screen-share:stopped`
-- `notification:new`
-
-### Chat system
-
-Chat is implemented with:
-
-- Model: `src/models/Chat.js`
-- Controller: `src/controllers/chat.controller.js`
-- Routes: `src/routes/chat.routes.js`
-- Validators: `src/validators/chat.validators.js`
-
-REST endpoints:
-
-- `GET /api/chat/meetings/:meetingId/messages?limit=50`
-- `POST /api/chat/meetings/:meetingId/messages`
-
-Socket endpoint:
-
-- `chat:send`
-
-Chat messages are stored with meeting id, sender id, message text, optional attachments, timestamps, and soft-delete fields.
-
-### Notifications
-
-Notifications are implemented with:
-
-- Model: `src/models/Notification.js`
-- Service: `src/services/notification.service.js`
-- Controller: `src/controllers/notification.controller.js`
-- Routes: `src/routes/notification.routes.js`
-
-REST endpoints:
-
-- `GET /api/notifications`
-- `PATCH /api/notifications/:id/read`
-- `POST /api/notifications/mark-all-read`
-
-Realtime notifications are emitted to `user:{userId}` as:
-
-```text
-notification:new
-```
-
-Notifications are currently created for task assignment, action-item task creation, meeting summary completion, and screen-share start events.
-
-### AI meeting helpers with Groq
-
-AI helpers are implemented with:
-
-- Service: `src/services/ai.service.js`
-- Controller: `src/controllers/ai.controller.js`
-- Routes: `src/routes/ai.routes.js`
-- Validators: `src/validators/ai.validators.js`
-
-Environment variables:
-
 ```bash
-GROQ_API_KEY=your_groq_key
-GROQ_MODEL=llama-3.1-8b-instant
+npm run dev   # node --watch src/server.js
+npm start     # node src/server.js
 ```
-
-REST endpoints:
-
-- `POST /api/ai/meetings/:meetingId/transcribe`
-- `POST /api/ai/meetings/:meetingId/summary`
-- `POST /api/ai/meetings/:meetingId/action-items`
-- `POST /api/ai/meetings/:meetingId/tasks`
-
-Notes:
-
-- `summary` calls Groq and stores the result on the meeting.
-- `action-items` calls Groq and appends extracted action items to the meeting.
-- `tasks` converts provided or stored action items into `Task` documents.
-- `transcribe` is currently a transcript-ingestion placeholder. It accepts `text` or `transcript`; it does not transcribe uploaded audio yet.
-- If `GROQ_API_KEY` is missing or Groq fails, summary/action extraction falls back to local lightweight logic.
-
-### Task management
-
-Task management is implemented with:
-
-- Model: `src/models/Task.js`
-- Controller: `src/controllers/task.controller.js`
-- Routes: `src/routes/task.routes.js`
-- Validators: `src/validators/task.validators.js`
-
-REST endpoints:
-
-- `POST /api/tasks`
-- `GET /api/tasks`
-- `GET /api/tasks/:id`
-- `PUT /api/tasks/:id`
-- `DELETE /api/tasks/:id`
-
-Tasks support title, description, assignee, team, priority, status, due date, creator, and assignment notifications.
-
-### Team/workspace APIs
-
-The project uses `Team` as the workspace-style model.
-
-Implemented with:
-
-- Model: `src/models/Team.js`
-- Controller: `src/controllers/team.controller.js`
-- Routes: `src/routes/team.routes.js`
-- Validators: `src/validators/team.validators.js`
-
-REST endpoints:
-
-- `POST /api/teams`
-- `GET /api/teams`
-- `GET /api/teams/:id`
-- `PUT /api/teams/:id`
-- `DELETE /api/teams/:id`
-
-Teams support members and embedded project records. Task APIs can be scoped by `teamId`.
-
-### Data model additions
-
-Added or extended models for this feature set:
-
-- `Chat` — persistent meeting messages.
-- `Notification` — user notifications with read state and optional meeting/task links.
-- `Task` — task and action-item management.
-- `Team` — workspace/team grouping with members and projects.
-- `Meeting` — stores `summary`, `actionItems`, attachments, participants, and meeting metadata.
-
-### Quick smoke tests
-
-Health:
-
-```bash
-curl http://localhost:5000/api/health
-```
-
-Socket.IO handshake:
-
-```bash
-curl "http://localhost:5000/socket.io/?EIO=4&transport=polling"
-```
-
-AI summary:
-
-```bash
-curl -X POST http://localhost:5000/api/ai/meetings/MEETING_ID/summary \
-  -H "Authorization: Bearer ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"transcript":"We discussed login bugs. Rahul will fix auth. Priya needs to prepare the UI demo."}'
-```
-
-Action items:
-
-```bash
-curl -X POST http://localhost:5000/api/ai/meetings/MEETING_ID/action-items \
-  -H "Authorization: Bearer ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"transcript":"Rahul needs to fix auth. Priya should prepare the UI demo. Send report tomorrow."}'
-```
-
-Chat message:
-
-```bash
-curl -X POST http://localhost:5000/api/chat/meetings/MEETING_ID/messages \
-  -H "Authorization: Bearer ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Hello from backend chat"}'
-```
-
-Task creation:
-
-```bash
-curl -X POST http://localhost:5000/api/tasks \
-  -H "Authorization: Bearer ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Manual task","priority":"high","status":"todo"}'
-```
-
-Team/workspace creation:
-
-```bash
-curl -X POST http://localhost:5000/api/teams \
-  -H "Authorization: Bearer ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Dev Team","projects":[{"name":"IntellMeet"}]}'
-```
-
-### Known remaining work
-
-- Replace the transcription placeholder with real audio/video transcription.
-- Add a Socket.IO Redis adapter or Redis pub/sub if multiple backend instances need to share realtime events.
-- Add automated tests for socket auth/events, AI helper endpoints, task creation from action items, and notification delivery.
-- Confirm frontend event payloads match the socket event names documented above.

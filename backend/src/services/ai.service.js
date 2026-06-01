@@ -70,6 +70,31 @@ export async function extractActionItems(transcript) {
   return fallbackActionItems(transcript);
 }
 
-export async function transcribeAudioPlaceholder({ text }) {
-  return String(text || "").trim();
+function audioMimeType(filename = "") {
+  const ext = filename.split(".").pop().toLowerCase();
+  const map = { mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", mp4: "audio/mp4", ogg: "audio/ogg", flac: "audio/flac" };
+  return map[ext] || "audio/webm";
+}
+
+export async function transcribeAudio(buffer, filename = "audio.webm") {
+  if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY is not set");
+
+  const form = new FormData();
+  form.append("file", new Blob([buffer], { type: audioMimeType(filename) }), filename);
+  form.append("model", process.env.GROQ_STT_MODEL || "whisper-large-v3-turbo");
+  form.append("response_format", "json");
+
+  const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+    body: form,
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => response.statusText);
+    throw new Error(`Groq transcription error ${response.status}: ${detail}`);
+  }
+
+  const data = await response.json();
+  return String(data.text || "").trim();
 }

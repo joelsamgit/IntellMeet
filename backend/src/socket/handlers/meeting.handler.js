@@ -126,6 +126,40 @@ export function registerMeetingHandlers(io, socket) {
     }
   });
 
+  socket.on('end-meeting', async (data, callback) => {
+    try {
+      const { meetingId } = data;
+      if (!meetingId) return callback?.({ error: 'meetingId is required' });
+
+      const meeting = await Meeting.findById(meetingId);
+      if (!meeting) return callback?.({ error: 'Meeting not found' });
+
+      const isHost = String(meeting.host) === socket.userId;
+      if (!isHost && socket.user.role !== 'admin') {
+        return callback?.({ error: 'Only the host can end the meeting' });
+      }
+
+      await Meeting.findByIdAndUpdate(meetingId, {
+        status: 'ended',
+        endTime: new Date(),
+      });
+
+      // Kick everyone out of the room and notify
+      io.to(`meeting:${meetingId}`).emit('meeting-ended', {
+        meetingId,
+        endedBy: socket.userId,
+        endedByName: socket.user.name,
+        timestamp: Date.now(),
+      });
+
+      joinedRooms.delete(meetingId);
+      callback?.({ success: true });
+    } catch (err) {
+      console.error('end-meeting error:', err.message);
+      callback?.({ error: 'Failed to end meeting' });
+    }
+  });
+
   socket.on('mute-user', (data) => {
     const { meetingId, targetUserId } = data;
     if (!meetingId || !targetUserId) return;
