@@ -30,7 +30,12 @@ function isDevLocalOrigin(origin) {
   if (process.env.NODE_ENV === "production") return false;
   try {
     const u = new URL(origin);
-    const hostOk = u.hostname === "localhost" || u.hostname === "127.0.0.1";
+    const hostOk =
+      u.hostname === "localhost" ||
+      u.hostname === "127.0.0.1" ||
+      u.hostname.startsWith("192.168.") ||
+      u.hostname.startsWith("10.") ||
+      u.hostname.startsWith("172.");
     return hostOk && (u.protocol === "http:" || u.protocol === "https:");
   } catch {
     return false;

@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "@/components/common/Sidebar";
 import Header from "@/components/common/Header";
@@ -18,24 +19,34 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
 };
 
 export default function MainLayout() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation();
   const pageInfo = pageTitles[location.pathname] || {
     title: "IntellMeet",
     subtitle: "",
   };
 
+  // Automatically close sidebar when changing page on mobile
+  useEffect(() => {
+    setIsSidebarOpen(false);
+  }, [location.pathname]);
+
   return (
     <div className="flex h-screen bg-[#0a0b0f] overflow-hidden">
-      {/* Sidebar */}
-      <Sidebar />
+      {/* Sidebar with mobile toggle props */}
+      <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <Header title={pageInfo.title} subtitle={pageInfo.subtitle} />
+        {/* Header with hamburger menu trigger */}
+        <Header 
+          title={pageInfo.title} 
+          subtitle={pageInfo.subtitle} 
+          onMenuClick={() => setIsSidebarOpen(true)}
+        />
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-4 md:p-6">
           <Outlet />
         </main>
       </div>

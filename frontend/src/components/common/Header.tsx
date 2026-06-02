@@ -1,4 +1,4 @@
-import { Search, Video } from "lucide-react";
+import { Menu, Search, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -9,17 +9,30 @@ import NotificationsDropdown from "./NotificationsDropdown";
 interface HeaderProps {
   title: string;
   subtitle?: string;
+  onMenuClick?: () => void;
 }
 
-export default function Header({ title, subtitle }: HeaderProps) {
+export default function Header({ title, subtitle, onMenuClick }: HeaderProps) {
   const { user } = useAuthStore();
 
   return (
-    <header className="h-16 border-b border-white/5 bg-[#0d0e14]/80 backdrop-blur-sm flex items-center justify-between px-6 sticky top-0 z-10">
+    <header className="h-16 border-b border-white/5 bg-[#0d0e14]/80 backdrop-blur-sm flex items-center justify-between px-4 md:px-6 sticky top-0 z-10">
       {/* Left */}
-      <div>
-        <h1 className="text-lg font-semibold text-white">{title}</h1>
-        {subtitle && <p className="text-xs text-gray-400">{subtitle}</p>}
+      <div className="flex items-center gap-3">
+        {onMenuClick && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onMenuClick}
+            className="md:hidden text-gray-400 hover:text-white -ml-2"
+          >
+            <Menu className="w-5 h-5" />
+          </Button>
+        )}
+        <div>
+          <h1 className="text-base md:text-lg font-semibold text-white truncate max-w-[150px] sm:max-w-none">{title}</h1>
+          {subtitle && <p className="text-[10px] md:text-xs text-gray-400 truncate hidden sm:block">{subtitle}</p>}
+        </div>
       </div>
 
       {/* Center */}

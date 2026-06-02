@@ -194,14 +194,43 @@ export function useWebRTC(meetingId: string) {
     [ensurePeerForRemote, socket]
   );
 
-  const initLocalStream = useCallback(async () => {
+  const initLocalStream = useCallback(async (startMuted = false, startVideoOff = false) => {
     if (localStreamRef.current) return localStreamRef.current;
     console.log('[webrtc] requesting local media stream', { meetingId });
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: true,
-    });
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: true,
+      });
+      console.log('[webrtc] local audio and video media stream ready');
+    } catch (error) {
+      console.warn('[webrtc] failed to get audio and video, trying audio-only fallback:', error);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+        console.log('[webrtc] local audio-only fallback media stream ready');
+      } catch (audioError) {
+        console.error('[webrtc] both audio+video and audio-only media capture failed:', audioError);
+        throw audioError;
+      }
+    }
+
+    if (startMuted) {
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = false;
+      }
+    }
+    if (startVideoOff) {
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = false;
+      }
+    }
 
     localStreamRef.current = stream;
     setLocalStream(stream);

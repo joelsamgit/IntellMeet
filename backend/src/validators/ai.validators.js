@@ -3,7 +3,7 @@ import { body, param } from "express-validator";
 export const aiMeetingParam = [param("meetingId").isMongoId()];
 
 export const transcriptBodyValidators = [
-  param("meetingId").isMongoId(),
+  param("meetingId").exists().withMessage("Meeting ID is required"),
   body("transcript").optional().isString(),
   body("text").optional().isString(),
 ];

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/authStore";
 import { useMeetingRoom } from "@/hooks/useMeetingRoom";
@@ -7,7 +7,7 @@ import { useWebRTC } from "@/hooks/useWebRTC";
 import { useMeetingChat } from "@/hooks/useMeetingChat";
 import { useTranscription } from "@/hooks/useTranscription";
 import { getMeetingChatHistory } from "@/api/chat";
-import { transcribeMeeting } from "@/api/ai";
+import { transcribeMeeting, processMeeting } from "@/api/ai";
 import MeetingControls from "@/components/meeting/MeetingControls";
 import VideoTile from "@/components/meeting/VideoTile";
 import ChatPanel from "@/components/meeting/ChatPanel";
@@ -18,9 +18,43 @@ import { cn } from "@/lib/utils";
 import { useSocketStore } from "@/store/socketStore";
 import type { Participant } from "@/types";
 
-export default function MeetingRoomPage() {
-  const { meetingId } = useParams<{ meetingId: string }>();
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#0a0b0f] flex flex-col items-center justify-center p-6 text-white text-center">
+          <h2 className="text-xl font-bold text-red-500 mb-2">Application Error</h2>
+          <p className="text-sm text-gray-400 mb-4">The meeting room crashed during rendering:</p>
+          <pre className="bg-red-500/10 border border-red-500/20 p-4 rounded-lg text-xs font-mono max-w-2xl overflow-auto text-red-400 text-left">
+            {this.state.error?.stack || this.state.error?.message || String(this.state.error)}
+          </pre>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+function MeetingRoomContent() {
+  const { meetingId: rawMeetingId } = useParams<{ meetingId: string }>();
+  const meetingId = rawMeetingId?.trim().toLowerCase().replace(/[\s_]+/g, "-") || "";
   const navigate = useNavigate();
+  const location = useLocation();
+  const { initialMuted = false, initialVideoOff = false } = (location.state as any) || {};
   const { user } = useAuthStore();
   const { isConnected } = useSocketStore();
 
@@ -46,10 +80,12 @@ export default function MeetingRoomPage() {
   const {
     transcriptLines,
     isTranscribing,
+    recognitionStatus,
+    isSilenceDetected,
     startRecording,
     stopRecording,
     applyTranscriptionResult,
-  } = useTranscription(meetingId || '');
+  } = useTranscription(meetingId || '', isMuted);
 
   // Local state
   const [isRecording, setIsRecording] = useState(false);
@@ -63,7 +99,7 @@ export default function MeetingRoomPage() {
   useEffect(() => {
     (async () => {
       try {
-        await initLocalStream();
+        await initLocalStream(initialMuted, initialVideoOff);
       } catch (error) {
         console.error('[meeting] failed to initialize local media', error);
         toast.error('Could not access camera/microphone. You can still join chat.');
@@ -71,7 +107,7 @@ export default function MeetingRoomPage() {
         setIsInitializing(false);
       }
     })();
-  }, [initLocalStream]);
+  }, [initLocalStream, initialMuted, initialVideoOff]);
 
   // Attach local stream to video element
   useEffect(() => {
@@ -97,9 +133,14 @@ export default function MeetingRoomPage() {
 
   // Start transcription recording when joined
   useEffect(() => {
-    if (isJoined && localStream && !isTranscribing) {
-      console.log('[meeting] joined room, starting transcription recorder');
-      startRecording(localStream);
+    if (isJoined) {
+      if (!isTranscribing) {
+        console.log('[meeting] joined room, starting transcription');
+        startRecording(localStream);
+      } else if (localStream) {
+        // If we are already transcribing (live speech is active), but we just got localStream, start recording it
+        startRecording(localStream);
+      }
     }
   }, [isJoined, localStream, isTranscribing, startRecording]);
 
@@ -149,8 +190,15 @@ export default function MeetingRoomPage() {
     sendMessage(text);
   };
 
-  const handleLeave = async () => {
-    toast.info("Processing meeting...");
+  const handleLeaveMeeting = () => {
+    toast.info("Leaving meeting...");
+    leaveRoom();
+    void stopRecording();
+    navigate("/dashboard");
+  };
+
+  const handleEndMeeting = async () => {
+    toast.info("Ending meeting and generating summary...");
 
     leaveRoom();
 
@@ -158,14 +206,23 @@ export default function MeetingRoomPage() {
     const audioBlob = await stopRecording();
     if (audioBlob && meetingId) {
       try {
-        const result = await transcribeMeeting(meetingId, audioBlob);
-        applyTranscriptionResult(result?.data);
+        await processMeeting(meetingId, audioBlob, transcriptLines);
+        toast.success("AI analysis complete!");
+      } catch (err) {
+        console.error('Failed to process meeting:', err);
+        toast.error("Could not generate AI summary automatically.");
+      }
+    } else if (meetingId) {
+      try {
+        const emptyBlob = new Blob([], { type: 'audio/webm' });
+        await processMeeting(meetingId, emptyBlob, transcriptLines);
+        toast.success("AI analysis complete!");
       } catch (err) {
         console.error('Failed to process meeting:', err);
       }
     }
 
-    setTimeout(() => navigate(`/meeting/${meetingId}/post`), 500);
+    navigate(`/meeting/${meetingId}/post`);
   };
 
   // Build participant list for display
@@ -190,16 +247,22 @@ export default function MeetingRoomPage() {
     },
     // Remote participants from socket
     ...participants
-      .filter((p) => p.userId !== user?._id)
-      .map((p) => ({
-        id: p.userId,
-        name: p.userName,
-        isMuted: p.isMuted || false,
-        isVideoOff: p.isVideoOff || false,
-        isHost: meeting?.hostId ? p.userId === meeting.hostId : false,
-        isSpeaking: p.isSpeaking || false,
-        socketId: p.socketId,
-      })),
+      .filter((p: any) => {
+        const pId = p.userId || p._id || p.id;
+        return pId && pId !== user?._id;
+      })
+      .map((p: any) => {
+        const pId = p.userId || p._id || p.id || "";
+        return {
+          id: pId,
+          name: p.userName || p.name || "Guest",
+          isMuted: p.isMuted || false,
+          isVideoOff: p.isVideoOff || false,
+          isHost: meeting?.hostId ? pId === meeting.hostId : (p.isHost || false),
+          isSpeaking: p.isSpeaking || false,
+          socketId: p.socketId,
+        };
+      }),
   ];
 
   // Map transcript lines for the panel
@@ -269,17 +332,17 @@ export default function MeetingRoomPage() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Video Grid */}
-        <div className="flex-1 p-4 relative overflow-hidden">
+        <div className="flex-1 p-3 md:p-4 relative overflow-hidden flex flex-col justify-center">
           <div
             className={cn(
-              "h-full grid gap-3",
+              "w-full h-full max-h-full grid gap-2 md:gap-3 overflow-y-auto",
               displayParticipants.length === 1 && "grid-cols-1",
-              displayParticipants.length === 2 && "grid-cols-2",
-              displayParticipants.length === 3 && "grid-cols-2 grid-rows-2",
-              displayParticipants.length === 4 && "grid-cols-2 grid-rows-2",
-              displayParticipants.length > 4 && "grid-cols-3"
+              displayParticipants.length === 2 && "grid-cols-1 md:grid-cols-2",
+              displayParticipants.length === 3 && "grid-cols-1 md:grid-cols-2 md:grid-rows-2",
+              displayParticipants.length === 4 && "grid-cols-1 sm:grid-cols-2 md:grid-rows-2",
+              displayParticipants.length > 4 && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
             )}
           >
             {displayParticipants.map((participant, index) => {
@@ -311,8 +374,19 @@ export default function MeetingRoomPage() {
           )}
 
           {/* Live Transcription Overlay */}
-          <TranscriptionPanel lines={transcriptDisplay} isLive={isTranscribing} />
+          <TranscriptionPanel lines={transcriptDisplay} isLive={isTranscribing} status={recognitionStatus} isSilenceDetected={isSilenceDetected && !isMuted} />
         </div>
+
+        {/* Side Panels Overlay Backdrop for Mobile */}
+        {(isParticipantsOpen || isChatOpen) && (
+          <div
+            className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden"
+            onClick={() => {
+              setIsParticipantsOpen(false);
+              setIsChatOpen(false);
+            }}
+          />
+        )}
 
         {/* Side Panels */}
         {isParticipantsOpen && (
@@ -347,8 +421,17 @@ export default function MeetingRoomPage() {
         onToggleParticipants={() =>
           setIsParticipantsOpen(!isParticipantsOpen)
         }
-        onLeave={handleLeave}
+        onLeave={handleLeaveMeeting}
+        onEnd={handleEndMeeting}
       />
     </div>
+  );
+}
+
+export default function MeetingRoomPage() {
+  return (
+    <ErrorBoundary>
+      <MeetingRoomContent />
+    </ErrorBoundary>
   );
 }

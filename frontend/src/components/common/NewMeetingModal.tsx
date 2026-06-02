@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { format } from "date-fns";
+import { createMeeting } from "@/api/meetings";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +34,8 @@ interface NewMeetingModalProps {
 
 const schema = z.object({
   title: z.string().min(3, "Title must be at least 3 characters"),
+  date: z.string().optional(),
+  time: z.string().optional(),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -58,6 +62,8 @@ export default function NewMeetingModal({
   const [copied, setCopied] = useState(false);
   const [joinId, setJoinId] = useState("");
   const [meetingId] = useState(generateMeetingId());
+  const [muteOnJoin, setMuteOnJoin] = useState(false);
+  const [videoOff, setVideoOff] = useState(false);
 
   const {
     register,
@@ -65,7 +71,11 @@ export default function NewMeetingModal({
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { title: "My Meeting" },
+    defaultValues: {
+      title: "My Meeting",
+      date: format(new Date(), "yyyy-MM-dd"),
+      time: format(new Date(), "HH:mm"),
+    },
   });
 
   const meetingLink = `${window.location.origin}/meeting/${meetingId}`;
@@ -78,11 +88,27 @@ export default function NewMeetingModal({
   };
 
   const handleStartMeeting = async (data: FormData) => {
-    setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    toast.success(`Starting "${data.title}"...`);
-    onClose();
-    navigate(`/meeting/${meetingId}`);
+    try {
+      setIsLoading(true);
+      const res = await createMeeting({
+        title: data.title,
+        scheduledTime: new Date().toISOString(),
+        status: "live",
+      });
+      toast.success(`Starting "${res.meeting.title}"...`);
+      onClose();
+      navigate(`/meeting/${res.meeting.meetingCode || res.meeting._id}`, {
+        state: {
+          initialMuted: muteOnJoin,
+          initialVideoOff: videoOff,
+        }
+      });
+    } catch (err) {
+      toast.error("Failed to start meeting");
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleJoinMeeting = () => {
@@ -90,15 +116,29 @@ export default function NewMeetingModal({
       toast.error("Please enter a meeting ID");
       return;
     }
-    const cleanId = joinId.trim().toLowerCase();
+    const cleanId = joinId.trim().toLowerCase().replace(/[\s_]+/g, "-");
     toast.success("Joining meeting...");
     onClose();
     navigate(`/meeting/${cleanId}`);
   };
 
-  const handleSchedule = (data: FormData) => {
-    toast.success(`Meeting "${data.title}" scheduled!`);
-    onClose();
+  const handleSchedule = async (data: FormData) => {
+    try {
+      setIsLoading(true);
+      const scheduledTime = new Date(`${data.date}T${data.time}`).toISOString();
+      const res = await createMeeting({
+        title: data.title,
+        scheduledTime,
+        status: "scheduled",
+      });
+      toast.success(`Meeting "${res.meeting.title}" scheduled!`);
+      onClose();
+    } catch (err) {
+      toast.error("Failed to schedule meeting");
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -187,22 +227,24 @@ export default function NewMeetingModal({
 
               {/* Options */}
               <div className="flex items-center gap-3 py-1">
-                {[
-                  { label: "Mute on join", defaultChecked: false },
-                  { label: "Video off", defaultChecked: false },
-                ].map((opt) => (
-                  <label
-                    key={opt.label}
-                    className="flex items-center gap-2 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      defaultChecked={opt.defaultChecked}
-                      className="w-3.5 h-3.5 rounded accent-indigo-500"
-                    />
-                    <span className="text-xs text-gray-400">{opt.label}</span>
-                  </label>
-                ))}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={muteOnJoin}
+                    onChange={(e) => setMuteOnJoin(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded accent-indigo-500"
+                  />
+                  <span className="text-xs text-gray-400">Mute on join</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={videoOff}
+                    onChange={(e) => setVideoOff(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded accent-indigo-500"
+                  />
+                  <span className="text-xs text-gray-400">Video off</span>
+                </label>
               </div>
 
               {/* Buttons */}
@@ -261,6 +303,7 @@ export default function NewMeetingModal({
                   <Label className="text-gray-300 text-sm">Date</Label>
                   <Input
                     type="date"
+                    {...register("date")}
                     className="bg-white/5 border-white/10 text-white h-10 focus:border-indigo-500"
                   />
                 </div>
@@ -268,6 +311,7 @@ export default function NewMeetingModal({
                   <Label className="text-gray-300 text-sm">Time</Label>
                   <Input
                     type="time"
+                    {...register("time")}
                     className="bg-white/5 border-white/10 text-white h-10 focus:border-indigo-500"
                   />
                 </div>

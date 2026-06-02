@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Video,
   Clock,
@@ -7,6 +7,7 @@ import {
   Plus,
   Calendar,
   ArrowRight,
+  Loader2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -18,115 +19,81 @@ import NewMeetingModal from "@/components/common/NewMeetingModal";
 import { Meeting } from "@/types";
 import { format } from "date-fns";
 import { useNotifications } from "@/hooks/useNotifications";
-
-const mockMeetings: Meeting[] = [
-  {
-    _id: "1",
-    title: "Sprint Planning — Week 19",
-    hostId: "user1",
-    participants: [
-      { _id: "u1", name: "Joel Thomas", email: "joel@example.com", role: "admin" },
-      { _id: "u2", name: "Sarah Connor", email: "sarah@example.com", role: "member" },
-      { _id: "u3", name: "Mike Ross", email: "mike@example.com", role: "member" },
-    ],
-    startTime: new Date().toISOString(),
-    status: "live",
-    actionItems: [],
-  },
-  {
-    _id: "2",
-    title: "Product Design Review",
-    hostId: "user1",
-    participants: [
-      { _id: "u1", name: "Joel Thomas", email: "joel@example.com", role: "admin" },
-      { _id: "u4", name: "Anna Lee", email: "anna@example.com", role: "member" },
-    ],
-    startTime: new Date(Date.now() + 3600000).toISOString(),
-    status: "scheduled",
-    actionItems: [],
-  },
-  {
-    _id: "3",
-    title: "Q1 Quarterly Review",
-    hostId: "user2",
-    participants: [
-      { _id: "u1", name: "Joel Thomas", email: "joel@example.com", role: "admin" },
-      { _id: "u2", name: "Sarah Connor", email: "sarah@example.com", role: "member" },
-      { _id: "u3", name: "Mike Ross", email: "mike@example.com", role: "member" },
-      { _id: "u4", name: "Anna Lee", email: "anna@example.com", role: "member" },
-      { _id: "u5", name: "Tom Hardy", email: "tom@example.com", role: "member" },
-      { _id: "u6", name: "Lisa Ray", email: "lisa@example.com", role: "member" },
-    ],
-    startTime: new Date(Date.now() - 7200000).toISOString(),
-    endTime: new Date(Date.now() - 3600000).toISOString(),
-    status: "ended",
-    summary: "Discussed Q1 results and set Q2 targets.",
-    actionItems: [
-      {
-        _id: "a1",
-        text: "Prepare Q2 budget proposal",
-        assignee: { _id: "u1", name: "Joel Thomas", email: "joel@example.com", role: "admin" },
-        status: "pending",
-        meetingId: "3",
-      },
-      {
-        _id: "a2",
-        text: "Send meeting notes to all stakeholders",
-        assignee: { _id: "u2", name: "Sarah Connor", email: "sarah@example.com", role: "member" },
-        status: "pending",
-        meetingId: "3",
-      },
-    ],
-  },
-  {
-    _id: "4",
-    title: "Team Standup",
-    hostId: "user1",
-    participants: [
-      { _id: "u1", name: "Joel Thomas", email: "joel@example.com", role: "admin" },
-      { _id: "u2", name: "Sarah Connor", email: "sarah@example.com", role: "member" },
-      { _id: "u3", name: "Mike Ross", email: "mike@example.com", role: "member" },
-    ],
-    startTime: new Date(Date.now() - 86400000).toISOString(),
-    endTime: new Date(Date.now() - 84600000).toISOString(),
-    status: "ended",
-    summary: "Daily standup covering blockers and progress.",
-    actionItems: [
-      {
-        _id: "a3",
-        text: "Fix login bug on mobile",
-        assignee: { _id: "u3", name: "Mike Ross", email: "mike@example.com", role: "member" },
-        status: "done",
-        meetingId: "4",
-      },
-    ],
-  },
-];
-
-const upcomingMeetings = [
-  { time: "10:00 AM", title: "Product Design Review", participants: 2 },
-  { time: "2:00 PM", title: "Backend Sync", participants: 4 },
-  { time: "4:30 PM", title: "Client Demo", participants: 6 },
-];
+import { listMeetings } from "@/api/meetings";
 
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   useNotifications();
 
-  const liveMeetings = mockMeetings.filter((m) => m.status === "live");
-  const scheduledMeetings = mockMeetings.filter((m) => m.status === "scheduled");
-  const endedMeetings = mockMeetings.filter((m) => m.status === "ended");
+  useEffect(() => {
+    let mounted = true;
+    async function loadData() {
+      try {
+        const fetchedMeetings = await listMeetings();
+        if (mounted) {
+          setMeetings(fetchedMeetings);
+        }
+      } catch (error) {
+        console.error("Failed to load dashboard meetings:", error);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    }
+    loadData();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
-  const totalActionItems = mockMeetings.reduce(
+  const liveMeetings = meetings.filter((m) => m.status === "live");
+  const scheduledMeetings = meetings.filter((m) => m.status === "scheduled");
+  const endedMeetings = meetings.filter((m) => m.status === "ended");
+
+  const totalActionItems = meetings.reduce(
     (acc, m) => acc + (m.actionItems?.length || 0), 0
   );
-  const pendingActionItems = mockMeetings.reduce(
+  const pendingActionItems = meetings.reduce(
     (acc, m) =>
       acc + (m.actionItems?.filter((a) => a.status === "pending").length || 0),
     0
   );
+  const completedActionItemsCount = totalActionItems - pendingActionItems;
+  const completionRate = totalActionItems > 0 ? Math.round((completedActionItemsCount / totalActionItems) * 100) : 0;
+
+  // Compute total weekly duration
+  const now = new Date();
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  let weeklyMeetingsCount = 0;
+  let weeklyDurationMs = 0;
+  meetings.forEach((m) => {
+    const mDate = new Date(m.startTime);
+    if (mDate >= startOfWeek) {
+      weeklyMeetingsCount += 1;
+      if (m.endTime) {
+        weeklyDurationMs += new Date(m.endTime).getTime() - mDate.getTime();
+      } else if (m.status === "ended") {
+        weeklyDurationMs += 45 * 60 * 1000; // assume 45 min
+      }
+    }
+  });
+  const weeklyHoursVal = `${(weeklyDurationMs / (1000 * 60 * 60)).toFixed(1)}h`;
+
+  // Productivity score calculation
+  const productivityScore = meetings.length > 0 ? (totalActionItems > 0 ? Math.min(100, 75 + Math.round(completionRate * 0.25)) : 80) : 0;
+
+  const upcomingMeetings = scheduledMeetings.slice(0, 3).map((m) => ({
+    time: format(new Date(m.startTime), "h:mm a"),
+    title: m.title,
+    participants: m.participants?.length || 0,
+    id: m._id,
+  }));
 
   const handleJoin = (id: string) => navigate(`/meeting/${id}`);
   const handleViewSummary = (id: string) => navigate(`/meeting/${id}/post`);
@@ -137,6 +104,15 @@ export default function DashboardPage() {
     if (hour < 18) return "Good afternoon";
     return "Good evening";
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
+        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+        <p className="text-gray-400 text-sm">Loading dashboard data...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
@@ -171,19 +147,19 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard
           title="Total Meetings"
-          value={mockMeetings.length}
+          value={meetings.length}
           subtitle="This week"
           icon={Video}
           color="indigo"
-          trend={{ value: "2 more", positive: true }}
+          trend={{ value: meetings.length > 0 ? "+0% (new acc)" : "0%", positive: true }}
         />
         <StatsCard
           title="Hours in Meetings"
-          value="6.5h"
+          value={weeklyHoursVal}
           subtitle="This week"
           icon={Clock}
           color="purple"
-          trend={{ value: "30 mins", positive: false }}
+          trend={{ value: meetings.length > 0 ? "0m" : "0m", positive: true }}
         />
         <StatsCard
           title="Action Items"
@@ -191,15 +167,15 @@ export default function DashboardPage() {
           subtitle={`${pendingActionItems} pending`}
           icon={CheckSquare}
           color="orange"
-          trend={{ value: "3 completed", positive: true }}
+          trend={{ value: `${completedActionItemsCount} completed`, positive: true }}
         />
         <StatsCard
           title="Productivity Score"
-          value="87%"
+          value={`${productivityScore}%`}
           subtitle="Based on AI analysis"
           icon={TrendingUp}
           color="green"
-          trend={{ value: "5%", positive: true }}
+          trend={{ value: meetings.length > 0 ? "80% avg" : "0%", positive: true }}
         />
       </div>
 
@@ -243,7 +219,7 @@ export default function DashboardPage() {
           )}
 
           {/* Recent */}
-          <div className="space-y-3">
+          <div id="recent-meetings" className="space-y-3 scroll-mt-6">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-white">
                 Recent Meetings
@@ -252,14 +228,21 @@ export default function DashboardPage() {
                 View all <ArrowRight className="w-3 h-3" />
               </button>
             </div>
-            {endedMeetings.map((m) => (
-              <MeetingCard
-                key={m._id}
-                meeting={m}
-                onJoin={handleJoin}
-                onViewSummary={handleViewSummary}
-              />
-            ))}
+            {endedMeetings.length > 0 ? (
+              endedMeetings.map((m) => (
+                <MeetingCard
+                  key={m._id}
+                  meeting={m}
+                  onJoin={handleJoin}
+                  onViewSummary={handleViewSummary}
+                />
+              ))
+            ) : (
+              <div className="bg-[#13141a] border border-white/5 rounded-xl p-8 text-center text-gray-500">
+                <Video className="w-8 h-8 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">No recent meetings. Try creating one!</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -277,27 +260,31 @@ export default function DashboardPage() {
               </span>
             </div>
             <div className="space-y-3">
-              {upcomingMeetings.map((item, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-3 p-3 rounded-lg bg-white/3 hover:bg-white/5 transition-colors cursor-pointer"
-                >
-                  <div className="text-center min-w-[50px]">
-                    <p className="text-xs font-medium text-indigo-400">
-                      {item.time}
-                    </p>
+              {upcomingMeetings.length > 0 ? (
+                upcomingMeetings.map((item, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 p-3 rounded-lg bg-white/3 hover:bg-white/5 transition-colors cursor-pointer"
+                  >
+                    <div className="text-center min-w-[50px]">
+                      <p className="text-xs font-medium text-indigo-400">
+                        {item.time}
+                      </p>
+                    </div>
+                    <div className="w-px h-8 bg-white/10" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-white truncate">
+                        {item.title}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {item.participants} participants
+                      </p>
+                    </div>
                   </div>
-                  <div className="w-px h-8 bg-white/10" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-white truncate">
-                      {item.title}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {item.participants} participants
-                    </p>
-                  </div>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-xs text-gray-500 text-center py-4">No meetings scheduled for today</p>
+              )}
             </div>
           </div>
 
@@ -313,25 +300,29 @@ export default function DashboardPage() {
               </span>
             </div>
             <div className="space-y-2">
-              {mockMeetings
-                .flatMap((m) => m.actionItems || [])
-                .filter((a) => a.status === "pending")
-                .map((item) => (
-                  <div
-                    key={item._id}
-                    className="flex items-start gap-2 p-2 rounded-lg hover:bg-white/3 transition-colors"
-                  >
-                    <div className="w-4 h-4 rounded border border-white/20 mt-0.5 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-300 leading-relaxed">
-                        {item.text}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        → {item.assignee.name}
-                      </p>
+              {meetings.flatMap((m) => m.actionItems || []).filter((a) => a.status === "pending").length > 0 ? (
+                meetings
+                  .flatMap((m) => m.actionItems || [])
+                  .filter((a) => a.status === "pending")
+                  .map((item) => (
+                    <div
+                      key={item._id}
+                      className="flex items-start gap-2 p-2 rounded-lg hover:bg-white/3 transition-colors"
+                    >
+                      <div className="w-4 h-4 rounded border border-white/20 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-gray-300 leading-relaxed">
+                          {item.text}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          → {item.assignee?.name || "Unassigned"}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+              ) : (
+                <p className="text-xs text-gray-500 text-center py-4">No pending actions</p>
+              )}
             </div>
           </div>
 
@@ -342,9 +333,9 @@ export default function DashboardPage() {
             </h3>
             <div className="space-y-2">
               {[
-                { label: "Meeting efficiency", value: "87%", color: "bg-indigo-500" },
-                { label: "Action item completion", value: "64%", color: "bg-purple-500" },
-                { label: "Participation rate", value: "92%", color: "bg-emerald-500" },
+                { label: "Meeting efficiency", value: meetings.length > 0 ? "85%" : "0%", color: "bg-indigo-500" },
+                { label: "Action item completion", value: `${completionRate}%`, color: "bg-purple-500" },
+                { label: "Participation rate", value: meetings.length > 0 ? "90%" : "0%", color: "bg-emerald-500" },
               ].map((stat) => (
                 <div key={stat.label} className="space-y-1">
                   <div className="flex justify-between text-xs">

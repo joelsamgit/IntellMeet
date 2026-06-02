@@ -30,6 +30,7 @@ interface MeetingControlsProps {
   onToggleChat: () => void;
   onToggleParticipants: () => void;
   onLeave: () => void;
+  onEnd: () => void;
 }
 
 interface ControlButtonProps {
@@ -103,11 +104,12 @@ export default function MeetingControls({
   onToggleChat,
   onToggleParticipants,
   onLeave,
+  onEnd,
 }: MeetingControlsProps) {
   return (
-    <div className="h-20 bg-[#0d0e14]/95 backdrop-blur-sm border-t border-white/5 flex items-center justify-between px-6">
-      {/* Left - Meeting Info */}
-      <div className="flex items-center gap-3 min-w-[200px]">
+    <div className="h-20 bg-[#0d0e14]/95 backdrop-blur-sm border-t border-white/5 flex items-center justify-between px-4 md:px-6">
+      {/* Left - Meeting Info (Hidden on mobile to save space) */}
+      <div className="hidden lg:flex items-center gap-3 min-w-[200px]">
         {isRecording && (
           <div className="flex items-center gap-2 bg-red-500/15 border border-red-500/20 rounded-lg px-3 py-1.5">
             <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
@@ -116,8 +118,8 @@ export default function MeetingControls({
         )}
       </div>
 
-      {/* Center - Main Controls */}
-      <div className="flex items-center gap-2">
+      {/* Desktop Main Controls (Visible on medium screens and larger) */}
+      <div className="hidden md:flex items-center gap-2 mx-auto">
         <ControlButton
           onClick={onToggleMute}
           icon={<Mic className="w-5 h-5" />}
@@ -151,19 +153,28 @@ export default function MeetingControls({
           label="Raise Hand"
         />
 
-        {/* Leave Button */}
+        {/* Leave & End Buttons */}
         <div className="w-px h-8 bg-white/10 mx-2" />
-        <button
-          onClick={onLeave}
-          className="flex items-center gap-2 bg-red-500 hover:bg-red-400 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 shadow-lg shadow-red-500/20"
-        >
-          <PhoneOff className="w-4 h-4" />
-          Leave
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onLeave}
+            className="flex items-center gap-1.5 bg-white/5 border border-white/10 hover:bg-white/10 text-gray-300 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200"
+          >
+            <PhoneOff className="w-4 h-4 text-red-400" />
+            Leave
+          </button>
+          <button
+            onClick={onEnd}
+            className="flex items-center gap-1.5 bg-red-600 hover:bg-red-500 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 shadow-lg shadow-red-600/20"
+          >
+            <Circle className="w-4 h-4 fill-white animate-pulse" />
+            End Meeting
+          </button>
+        </div>
       </div>
 
-      {/* Right - Panel Toggles */}
-      <div className="flex items-center gap-2 min-w-[200px] justify-end">
+      {/* Desktop Panel Toggles (Visible on medium screens and larger) */}
+      <div className="hidden md:flex items-center gap-2 min-w-[200px] justify-end">
         <ControlButton
           onClick={onToggleParticipants}
           icon={<Users className="w-5 h-5" />}
@@ -181,6 +192,55 @@ export default function MeetingControls({
           icon={<MoreHorizontal className="w-5 h-5" />}
           label="More Options"
         />
+      </div>
+
+      {/* Mobile Streamlined Layout (Visible ONLY on mobile screens) */}
+      <div className="flex md:hidden items-center justify-between w-full gap-2">
+        <div className="flex items-center gap-2">
+          <ControlButton
+            onClick={onToggleMute}
+            icon={<Mic className="w-5 h-5" />}
+            offIcon={<MicOff className="w-5 h-5" />}
+            isOff={isMuted}
+            label={isMuted ? "Unmute" : "Mute"}
+          />
+          <ControlButton
+            onClick={onToggleVideo}
+            icon={<Video className="w-5 h-5" />}
+            offIcon={<VideoOff className="w-5 h-5" />}
+            isOff={isVideoOff}
+            label={isVideoOff ? "Start Video" : "Stop Video"}
+          />
+          <ControlButton
+            onClick={onToggleChat}
+            icon={<MessageSquare className="w-5 h-5" />}
+            isActive={isChatOpen}
+            label="Chat"
+          />
+          <ControlButton
+            onClick={onToggleParticipants}
+            icon={<Users className="w-5 h-5" />}
+            isActive={isParticipantsOpen}
+            label="Participants"
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Leave Button */}
+          <ControlButton
+            onClick={onLeave}
+            icon={<PhoneOff className="w-5 h-5 text-red-400" />}
+            label="Leave"
+            isOff={true} // subtle red border
+          />
+          {/* End Meeting Button */}
+          <ControlButton
+            onClick={onEnd}
+            icon={<Circle className="w-5 h-5 fill-white animate-pulse" />}
+            label="End Meeting"
+            danger={true} // solid red
+          />
+        </div>
       </div>
     </div>
   );

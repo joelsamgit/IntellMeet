@@ -25,7 +25,13 @@ function ScrollToTop() {
 
 // Protected Route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuthStore();
   useSocket();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
   return <>{children}</>;
 }
 

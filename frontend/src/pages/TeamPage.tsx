@@ -1,12 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Users,
   Plus,
   Search,
-  LayoutGrid,
-  List,
+  Loader2,
   Kanban,
-  Filter,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,52 +13,72 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import TeamMemberCard from "@/components/team/TeamMemberCard";
 import KanbanBoard from "@/components/team/KanbanBoard";
-
-const teamMembers = [
-  {
-    id: "u1",
-    name: "Joel Thomas",
-    email: "joel@intellmeet.com",
-    role: "Frontend Developer",
-    isHost: true,
-    status: "online" as const,
-    tasksCompleted: 12,
-    meetingsThisWeek: 8,
-  },
-  {
-    id: "u2",
-    name: "Sarah Connor",
-    email: "sarah@intellmeet.com",
-    role: "Frontend Developer",
-    status: "online" as const,
-    tasksCompleted: 9,
-    meetingsThisWeek: 6,
-  },
-  {
-    id: "u3",
-    name: "Mike Ross",
-    email: "mike@intellmeet.com",
-    role: "Backend Developer",
-    status: "busy" as const,
-    tasksCompleted: 15,
-    meetingsThisWeek: 5,
-  },
-  {
-    id: "u4",
-    name: "Anna Lee",
-    email: "anna@intellmeet.com",
-    role: "UI/UX Designer",
-    status: "away" as const,
-    tasksCompleted: 7,
-    meetingsThisWeek: 4,
-  },
-];
+import { listAllUsers } from "@/api/users";
+import { listMeetings } from "@/api/meetings";
+import { listTasks } from "@/api/tasks";
 
 export default function TeamPage() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("members");
+  const [members, setMembers] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const filteredMembers = teamMembers.filter(
+  useEffect(() => {
+    let mounted = true;
+    async function loadMembers() {
+      try {
+        const [users, fetchedMeetings, fetchedTasks] = await Promise.all([
+          listAllUsers(),
+          listMeetings(),
+          listTasks(),
+        ]);
+        if (mounted) {
+          // Calculate start of current week
+          const now = new Date();
+          const startOfWeek = new Date(now);
+          startOfWeek.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));
+          startOfWeek.setHours(0, 0, 0, 0);
+
+          setMembers(
+            users.map((u) => {
+              const tasksCompleted = fetchedTasks.filter(
+                (t) => t.assignee?._id === u._id && t.status === "done"
+              ).length;
+
+              const meetingsThisWeek = fetchedMeetings.filter((m) => {
+                const mDate = new Date(m.startTime);
+                if (mDate < startOfWeek) return false;
+                const isHost = m.hostId === u._id;
+                const isParticipant = m.participants?.some((p) => p._id === u._id);
+                return isHost || isParticipant;
+              }).length;
+
+              return {
+                id: u._id,
+                name: u.name,
+                email: u.email,
+                role: u.role === "admin" ? "Host / Admin" : "Team Member",
+                status: "online",
+                tasksCompleted,
+                meetingsThisWeek,
+                avatar: u.avatar || "",
+              };
+            })
+          );
+        }
+      } catch (err) {
+        console.error("Failed to load members:", err);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    }
+    loadMembers();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const filteredMembers = members.filter(
     (m) =>
       m.name.toLowerCase().includes(search.toLowerCase()) ||
       m.role.toLowerCase().includes(search.toLowerCase())
@@ -73,8 +91,8 @@ export default function TeamPage() {
         <div>
           <h2 className="text-lg font-bold text-white">Team Workspace</h2>
           <p className="text-sm text-gray-400 mt-0.5">
-            {teamMembers.length} members •{" "}
-            {teamMembers.filter((m) => m.status === "online").length} online
+            {members.length} members •{" "}
+            {members.filter((m) => m.status === "online").length} online
           </p>
         </div>
         <Button
@@ -86,89 +104,95 @@ export default function TeamPage() {
         </Button>
       </div>
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <div className="flex items-center justify-between gap-4">
-          <TabsList className="bg-[#13141a] border border-white/5 p-1">
-            <TabsTrigger
-              value="members"
-              className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white text-gray-400 text-sm gap-1.5"
-            >
-              <Users className="w-3.5 h-3.5" />
-              Members
-            </TabsTrigger>
-            <TabsTrigger
-              value="board"
-              className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white text-gray-400 text-sm gap-1.5"
-            >
-              <Kanban className="w-3.5 h-3.5" />
-              Task Board
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Search */}
-          {activeTab === "members" && (
-            <div className="relative max-w-xs w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search members..."
-                className="pl-9 bg-white/5 border-white/10 text-white placeholder:text-gray-600 h-9 text-sm"
-              />
-            </div>
-          )}
+      {isLoading ? (
+        <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4">
+          <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+          <p className="text-gray-400 text-sm">Loading workspace members...</p>
         </div>
+      ) : (
+        /* Tabs */
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <div className="flex items-center justify-between gap-4">
+            <TabsList className="bg-[#13141a] border border-white/5 p-1">
+              <TabsTrigger
+                value="members"
+                className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white text-gray-400 text-sm gap-1.5"
+              >
+                <Users className="w-3.5 h-3.5" />
+                Members
+              </TabsTrigger>
+              <TabsTrigger
+                value="board"
+                className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white text-gray-400 text-sm gap-1.5"
+              >
+                <Kanban className="w-3.5 h-3.5" />
+                Task Board
+              </TabsTrigger>
+            </TabsList>
 
-        {/* Members Tab */}
-        <TabsContent value="members" className="mt-4">
-          {/* Online Status Bar */}
-          <div className="flex items-center gap-4 mb-5 p-4 bg-[#13141a] border border-white/5 rounded-xl">
-            {[
-              {
-                label: "Online",
-                count: teamMembers.filter((m) => m.status === "online").length,
-                color: "bg-emerald-500",
-              },
-              {
-                label: "Busy",
-                count: teamMembers.filter((m) => m.status === "busy").length,
-                color: "bg-red-500",
-              },
-              {
-                label: "Away",
-                count: teamMembers.filter((m) => m.status === "away").length,
-                color: "bg-yellow-500",
-              },
-              {
-                label: "Offline",
-                count: 0,
-                color: "bg-gray-500",
-              },
-            ].map((s) => (
-              <div key={s.label} className="flex items-center gap-2">
-                <span className={cn("w-2 h-2 rounded-full", s.color)} />
-                <span className="text-xs text-gray-400">
-                  {s.count} {s.label}
-                </span>
+            {/* Search */}
+            {activeTab === "members" && (
+              <div className="relative max-w-xs w-full">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search members..."
+                  className="pl-9 bg-white/5 border-white/10 text-white placeholder:text-gray-600 h-9 text-sm"
+                />
               </div>
-            ))}
+            )}
           </div>
 
-          {/* Members Grid */}
-          {filteredMembers.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {filteredMembers.map((member) => (
-                <TeamMemberCard key={member.id} member={member} />
+          {/* Members Tab */}
+          <TabsContent value="members" className="mt-4">
+            {/* Online Status Bar */}
+            <div className="flex items-center gap-4 mb-5 p-4 bg-[#13141a] border border-white/5 rounded-xl">
+              {[
+                {
+                  label: "Online",
+                  count: members.filter((m) => m.status === "online").length,
+                  color: "bg-emerald-500",
+                },
+                {
+                  label: "Busy",
+                  count: members.filter((m) => m.status === "busy").length,
+                  color: "bg-red-500",
+                },
+                {
+                  label: "Away",
+                  count: members.filter((m) => m.status === "away").length,
+                  color: "bg-yellow-500",
+                },
+                {
+                  label: "Offline",
+                  count: 0,
+                  color: "bg-gray-500",
+                },
+              ].map((s) => (
+                <div key={s.label} className="flex items-center gap-2">
+                  <span className={cn("w-2 h-2 rounded-full", s.color)} />
+                  <span className="text-xs text-gray-400">
+                    {s.count} {s.label}
+                  </span>
+                </div>
               ))}
             </div>
-          ) : (
-            <div className="text-center py-12 text-gray-500">
-              <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
-              <p className="text-sm">No members found</p>
-            </div>
-          )}
-        </TabsContent>
+
+            {/* Members Grid */}
+            {filteredMembers.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {filteredMembers.map((member) => (
+                  <TeamMemberCard key={member.id} member={member} />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">No members found</p>
+              </div>
+            )}
+          </TabsContent>
 
         {/* Kanban Board Tab */}
         <TabsContent value="board" className="mt-4">
@@ -189,6 +213,7 @@ export default function TeamPage() {
           <KanbanBoard />
         </TabsContent>
       </Tabs>
+      )}
     </div>
   );
 }

@@ -23,7 +23,12 @@ function isAllowedDevOrigin(origin) {
   if (origin === "app://hoppscotch") return true;
   try {
     const url = new URL(origin);
-    const localHost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    const localHost =
+      url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1" ||
+      url.hostname.startsWith("192.168.") ||
+      url.hostname.startsWith("10.") ||
+      url.hostname.startsWith("172.");
     const hoppscotch = url.hostname === "hoppscotch.io" || url.hostname.endsWith(".hoppscotch.io");
     return (
       (localHost && ["http:", "https:", "ws:", "wss:"].includes(url.protocol)) ||
@@ -61,13 +66,13 @@ function participantPayload(user, socketId) {
 }
 
 async function getAccessibleMeeting(meetingId, socket) {
-  const idOrCode = String(meetingId || "").trim();
+  const idOrCode = String(meetingId || "").trim().toLowerCase().replace(/[\s_]+/g, "-");
   if (!idOrCode) {
     throw new Error("meetingId is required");
   }
   const query = mongoose.Types.ObjectId.isValid(idOrCode)
-    ? { $or: [{ _id: new mongoose.Types.ObjectId(idOrCode) }, { meetingCode: idOrCode.toLowerCase() }] }
-    : { meetingCode: idOrCode.toLowerCase() };
+    ? { $or: [{ _id: new mongoose.Types.ObjectId(idOrCode) }, { meetingCode: idOrCode }] }
+    : { meetingCode: idOrCode };
   const meeting = await Meeting.findOne(query);
   if (process.env.NODE_ENV !== "production") {
     console.info("[Socket.IO meeting lookup]", {
@@ -86,6 +91,15 @@ async function getAccessibleMeeting(meetingId, socket) {
   if (!canAccessMeeting(meeting, socket.user._id, socket.user.role)) {
     throw new Error("Access denied for this meeting");
   }
+
+  // Automatically register participant if the meeting is live
+  const uid = String(socket.user._id);
+  const isParticipant = (meeting.participants || []).some((p) => String(p?._id || p) === uid);
+  if (!isParticipant && meeting.status === "live") {
+    meeting.participants.push(socket.user._id);
+    await meeting.save();
+  }
+
   return meeting;
 }
 

@@ -24,81 +24,32 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { getActionItems, getMeetingSummary, getMeetingTranscript } from "@/api/ai";
+import { getMeetingDetails } from "@/api/meetings";
 
-// Mock post-meeting data
+// Mock post-meeting data (Clean defaults for a new meeting)
 const fallbackMeetingData = {
   id: "test-meeting-123",
-  title: "Sprint Planning — Week 19",
-  date: new Date(Date.now() - 3600000),
-  duration: "48 minutes",
-  participants: [
-    { id: "u1", name: "Joel Thomas", role: "Host", avatar: "" },
-    { id: "u2", name: "Sarah Connor", role: "Member", avatar: "" },
-    { id: "u3", name: "Mike Ross", role: "Member", avatar: "" },
-    { id: "u4", name: "Anna Lee", role: "Member", avatar: "" },
-  ],
-  summary: `The team conducted the Week 19 Sprint Planning session. Joel Thomas opened the meeting by reviewing last sprint's velocity and identifying key blockers. Sarah Connor presented the completed authentication module and outlined her plan for the dashboard components. Mike Ross confirmed the API integration is on track and will be completed by end of day tomorrow. Anna Lee raised concerns about the design inconsistencies in the mobile view, which the team agreed to address in this sprint. The team committed to 34 story points for the sprint, focusing on the dashboard, API integration, and mobile responsiveness.`,
-  keyPoints: [
-    "Authentication module completed successfully by Sarah Connor",
-    "API integration 80% complete, ETA tomorrow",
-    "Mobile design inconsistencies identified — added to sprint backlog",
-    "Team committed to 34 story points for Sprint 19",
-    "Next sprint review scheduled for May 15th",
-  ],
-  actionItems: [
-    {
-      id: "a1",
-      text: "Complete API integration and write unit tests",
-      assigneeName: "Mike Ross",
-      assignee: { name: "Mike Ross", avatar: "" },
-      due: "Tomorrow",
-      priority: "high",
-      status: "pending",
-    },
-    {
-      id: "a2",
-      text: "Build dashboard UI components (charts, stats cards)",
-      assigneeName: "Sarah Connor",
-      assignee: { name: "Sarah Connor", avatar: "" },
-      due: "May 12",
-      priority: "high",
-      status: "pending",
-    },
-    {
-      id: "a3",
-      text: "Fix mobile responsive design issues on login page",
-      assigneeName: "Anna Lee",
-      assignee: { name: "Anna Lee", avatar: "" },
-      due: "May 11",
-      priority: "medium",
-      status: "pending",
-    },
-    {
-      id: "a4",
-      text: "Update sprint board with new tickets",
-      assigneeName: "Joel Thomas",
-      assignee: { name: "Joel Thomas", avatar: "" },
-      due: "Today",
-      priority: "low",
-      status: "done",
-    },
-  ],
-  transcript: [
-    { speaker: "Joel Thomas", time: "0:00", text: "Good afternoon everyone, let's get started with Sprint 19 planning." },
-    { speaker: "Joel Thomas", time: "0:45", text: "Looking at last sprint, we completed 31 out of 36 story points. Good progress overall." },
-    { speaker: "Sarah Connor", time: "2:10", text: "I finished the authentication module. JWT with refresh tokens is working perfectly." },
-    { speaker: "Mike Ross", time: "3:30", text: "API integration is about 80% done. Should have it wrapped up by tomorrow morning." },
-    { speaker: "Anna Lee", time: "5:15", text: "I noticed some design inconsistencies in the mobile view — the login page especially." },
-    { speaker: "Joel Thomas", time: "6:00", text: "Good catch Anna, let's add that to this sprint. What's everyone's capacity this week?" },
-    { speaker: "Sarah Connor", time: "7:20", text: "I can take on about 13 story points." },
-    { speaker: "Mike Ross", time: "7:45", text: "Same for me, around 12-13." },
-    { speaker: "Anna Lee", time: "8:10", text: "I can handle 8 points this week." },
-  ],
+  title: "Meeting Summary",
+  date: new Date(),
+  duration: "0 minutes",
+  participants: [] as Array<{ id: string; name: string; role: string; avatar: string }>,
+  summary: "No summary generated yet. Host a live meeting with speech to populate this summary.",
+  keyPoints: [] as string[],
+  actionItems: [] as Array<{
+    id: string;
+    text: string;
+    assigneeName: string;
+    assignee: { name: string; avatar: string };
+    due: string;
+    priority: string;
+    status: string;
+  }>,
+  transcript: [] as Array<{ speaker: string; time: string; text: string }>,
   stats: {
-    talkTime: { joel: 35, sarah: 28, mike: 22, anna: 15 },
-    sentiment: "Positive",
-    engagementScore: 89,
-    aiConfidence: 94,
+    talkTime: {} as Record<string, number>,
+    sentiment: "Neutral",
+    engagementScore: 0,
+    aiConfidence: 0,
   },
 };
 
@@ -126,10 +77,11 @@ export default function PostMeetingPage() {
       if (!meetingId) return;
 
       try {
-        const [summary, transcript, actionItems] = await Promise.all([
-          getMeetingSummary(meetingId),
-          getMeetingTranscript(meetingId),
-          getActionItems(meetingId),
+        const [meetingDetails, summary, transcript, actionItems] = await Promise.all([
+          getMeetingDetails(meetingId).catch(() => null),
+          getMeetingSummary(meetingId).catch(() => null),
+          getMeetingTranscript(meetingId).catch(() => null),
+          getActionItems(meetingId).catch(() => null),
         ]);
 
         if (!mounted) return;
@@ -146,39 +98,60 @@ export default function PostMeetingPage() {
                     : `0:${index.toString().padStart(2, '0')}`,
                 text: segment.text,
               }))
-            : current.transcript;
+            : [];
+
+          const durationText = meetingDetails?.endTime && meetingDetails?.startTime
+            ? `${Math.round((new Date(meetingDetails.endTime).getTime() - new Date(meetingDetails.startTime).getTime()) / 60000)} minutes`
+            : "Under 1 hour";
 
           return {
             ...current,
             id: meetingId,
-            summary: summary?.summary || current.summary,
-            keyPoints: summary?.keyPoints?.length ? summary.keyPoints : current.keyPoints,
+            title: meetingDetails?.title || current.title,
+            date: meetingDetails?.startTime ? new Date(meetingDetails.startTime) : current.date,
+            duration: durationText,
+            participants: meetingDetails?.participants?.length
+              ? meetingDetails.participants.map((p) => ({
+                  id: p._id,
+                  name: p.name,
+                  role: p.role === "admin" ? "Host" : "Member",
+                  avatar: p.avatar || "",
+                }))
+              : [],
+            summary: summary?.summary || meetingDetails?.summary || "No summary generated yet. Host a live meeting with speech to populate this summary.",
+            keyPoints: summary?.keyPoints?.length ? summary.keyPoints : [],
             transcript: transcriptLines,
-            actionItems: actionItems.length
-              ? actionItems.map((item) => ({
+            actionItems: meetingDetails?.actionItems?.length || actionItems?.length
+              ? [...(meetingDetails?.actionItems || []), ...(actionItems || [])].map((item: any) => ({
                   id: item._id,
                   text: item.text,
-                  assigneeName: item.assigneeName || 'Unassigned',
-                  assignee: { name: item.assigneeName || 'Unassigned', avatar: '' },
+                  assigneeName: item.assignee?.name || item.assigneeName || 'Unassigned',
+                  assignee: { name: item.assignee?.name || item.assigneeName || 'Unassigned', avatar: item.assignee?.avatar || '' },
                   due: item.dueDate ? format(new Date(item.dueDate), 'MMM d') : 'TBD',
-                  priority: item.priority,
-                  status: item.status === 'completed' ? 'done' : item.status,
+                  priority: item.priority || 'medium',
+                  status: item.status === 'completed' || item.status === 'done' ? 'done' : 'pending',
                 }))
-              : current.actionItems,
+              : [],
             stats: summary
               ? {
                   ...current.stats,
-                  sentiment: summary.sentiment || current.stats.sentiment,
-                  engagementScore: summary.engagementScore || current.stats.engagementScore,
-                  aiConfidence: summary.status === 'completed' ? 98 : current.stats.aiConfidence,
+                  sentiment: summary.sentiment || "Neutral",
+                  engagementScore: summary.engagementScore || 0,
+                  aiConfidence: summary.status === 'completed' ? 98 : 0,
                 }
-              : current.stats,
+              : {
+                  talkTime: {},
+                  sentiment: "Neutral",
+                  engagementScore: 0,
+                  aiConfidence: 0,
+                },
           };
         });
 
+        const activeActions = meetingDetails?.actionItems || actionItems || [];
         setCheckedItems(
-          actionItems
-            .filter((item) => item.status === 'completed')
+          activeActions
+            .filter((item) => item.status === 'completed' || item.status === 'done')
             .map((item) => item._id)
         );
       } catch (error) {
@@ -383,14 +356,18 @@ export default function PostMeetingPage() {
                 <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
                   Key Points
                 </h4>
-                <ul className="space-y-2">
-                  {meetingData.keyPoints.map((point, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm text-gray-300">
-                      <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-2 flex-shrink-0" />
-                      {point}
-                    </li>
-                  ))}
-                </ul>
+                {meetingData.keyPoints.length > 0 ? (
+                  <ul className="space-y-2">
+                    {meetingData.keyPoints.map((point, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-gray-300">
+                        <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-2 flex-shrink-0" />
+                        {point}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-gray-500 italic">No key points identified yet.</p>
+                )}
               </div>
             </div>
 
@@ -464,62 +441,69 @@ export default function PostMeetingPage() {
             </div>
 
             <div className="space-y-3">
-              {meetingData.actionItems.map((item) => {
-                const isDone = checkedItems.includes(item.id);
-                return (
-                  <div
-                    key={item.id}
-                    className={cn(
-                      "flex items-start gap-4 p-4 rounded-xl border transition-all duration-200",
-                      isDone
-                        ? "bg-white/2 border-white/5 opacity-60"
-                        : "bg-white/3 border-white/10 hover:border-white/20"
-                    )}
-                  >
-                    {/* Checkbox */}
-                    <button
-                      onClick={() => toggleActionItem(item.id)}
+              {meetingData.actionItems.length > 0 ? (
+                meetingData.actionItems.map((item) => {
+                  const isDone = checkedItems.includes(item.id);
+                  return (
+                    <div
+                      key={item.id}
                       className={cn(
-                        "w-5 h-5 rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all",
+                        "flex items-start gap-4 p-4 rounded-xl border transition-all duration-200",
                         isDone
-                          ? "bg-emerald-500 border-emerald-500"
-                          : "border-white/20 hover:border-indigo-400"
+                          ? "bg-white/2 border-white/5 opacity-60"
+                          : "bg-white/3 border-white/10 hover:border-white/20"
                       )}
                     >
-                      {isDone && <Check className="w-3 h-3 text-white" />}
-                    </button>
+                      {/* Checkbox */}
+                      <button
+                        onClick={() => toggleActionItem(item.id)}
+                        className={cn(
+                          "w-5 h-5 rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all",
+                          isDone
+                            ? "bg-emerald-500 border-emerald-500"
+                            : "border-white/20 hover:border-indigo-400"
+                        )}
+                      >
+                        {isDone && <Check className="w-3 h-3 text-white" />}
+                      </button>
 
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <p className={cn("text-sm text-white", isDone && "line-through text-gray-500")}>
-                        {item.text}
-                      </p>
-                      <div className="flex items-center gap-3 mt-2">
-                        <div className="flex items-center gap-1.5">
-                          <Avatar className="w-5 h-5">
-                              <AvatarFallback className="bg-indigo-600 text-white text-[10px]">
-                                {(item.assignee?.name || item.assigneeName || 'U').charAt(0)}
-                              </AvatarFallback>
-                          </Avatar>
-                          <span className="text-xs text-gray-400">
-                            {item.assignee?.name || item.assigneeName || 'Unassigned'}
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <p className={cn("text-sm text-white", isDone && "line-through text-gray-500")}>
+                          {item.text}
+                        </p>
+                        <div className="flex items-center gap-3 mt-2">
+                          <div className="flex items-center gap-1.5">
+                            <Avatar className="w-5 h-5">
+                                <AvatarFallback className="bg-indigo-600 text-white text-[10px]">
+                                  {(item.assignee?.name || item.assigneeName || 'U').charAt(0)}
+                                </AvatarFallback>
+                            </Avatar>
+                            <span className="text-xs text-gray-400">
+                              {item.assignee?.name || item.assigneeName || 'Unassigned'}
+                            </span>
+                          </div>
+                          <span className="text-gray-600 text-xs">•</span>
+                          <span className="text-xs text-gray-500 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            Due {item.due}
                           </span>
                         </div>
-                        <span className="text-gray-600 text-xs">•</span>
-                        <span className="text-xs text-gray-500 flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          Due {item.due}
-                        </span>
                       </div>
-                    </div>
 
-                    {/* Priority Badge */}
-                    <Badge className={cn("text-xs border capitalize flex-shrink-0", priorityConfig[item.priority as keyof typeof priorityConfig])}>
-                      {item.priority}
-                    </Badge>
-                  </div>
-                );
-              })}
+                      {/* Priority Badge */}
+                      <Badge className={cn("text-xs border capitalize flex-shrink-0", priorityConfig[item.priority as keyof typeof priorityConfig])}>
+                        {item.priority}
+                      </Badge>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-8 text-gray-500 bg-white/2 border border-white/5 rounded-xl">
+                  <CheckSquare className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">No action items identified for this meeting.</p>
+                </div>
+              )}
             </div>
           </div>
         </TabsContent>
@@ -543,21 +527,28 @@ export default function PostMeetingPage() {
             </div>
 
             <div className="space-y-4">
-              {meetingData.transcript.map((line, i) => (
-                <div key={i} className="flex gap-4 group">
-                  <span className="text-xs text-gray-600 font-mono mt-1 min-w-[35px]">
-                    {line.time}
-                  </span>
-                  <div className="flex-1 space-y-0.5">
-                    <span className="text-xs font-semibold text-indigo-400">
-                      {line.speaker}
+              {meetingData.transcript.length > 0 ? (
+                meetingData.transcript.map((line, i) => (
+                  <div key={i} className="flex gap-4 group">
+                    <span className="text-xs text-gray-600 font-mono mt-1 min-w-[35px]">
+                      {line.time}
                     </span>
-                    <p className="text-sm text-gray-300 leading-relaxed">
-                      {line.text}
-                    </p>
+                    <div className="flex-1 space-y-0.5">
+                      <span className="text-xs font-semibold text-indigo-400">
+                        {line.speaker}
+                      </span>
+                      <p className="text-sm text-gray-300 leading-relaxed">
+                        {line.text}
+                      </p>
+                    </div>
                   </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-gray-500 bg-white/2 border border-white/5 rounded-xl">
+                  <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">No transcript available for this meeting.</p>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </TabsContent>
@@ -572,25 +563,29 @@ export default function PostMeetingPage() {
                 Talk Time Distribution
               </h3>
               <div className="space-y-3">
-                {Object.entries(meetingData.stats.talkTime).map(([name, pct]) => {
-                  const fullName = meetingData.participants.find((p) =>
-                    p.name.toLowerCase().includes(name)
-                  )?.name || name;
-                  return (
-                    <div key={name} className="space-y-1.5">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-gray-300 capitalize">{fullName}</span>
-                        <span className="text-gray-400">{pct}%</span>
+                {Object.keys(meetingData.stats.talkTime).length > 0 ? (
+                  Object.entries(meetingData.stats.talkTime).map(([name, pct]) => {
+                    const fullName = meetingData.participants.find((p) =>
+                      p.name.toLowerCase().includes(name)
+                    )?.name || name;
+                    return (
+                      <div key={name} className="space-y-1.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-300 capitalize">{fullName}</span>
+                          <span className="text-gray-400">{pct}%</span>
+                        </div>
+                        <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-indigo-500 rounded-full transition-all duration-500"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                ) : (
+                  <p className="text-xs text-gray-500 italic">No talk time data available.</p>
+                )}
               </div>
             </div>
 

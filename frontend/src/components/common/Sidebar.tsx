@@ -9,6 +9,7 @@ import {
   Settings,
   LogOut,
   Plus,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuthStore } from "@/store/authStore";
@@ -26,11 +27,16 @@ const navItems = [
   { label: "Analytics", icon: BarChart3, path: "/analytics" },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
-  const { unreadCount } = useNotificationStore();
+  const { unreadCount, setIsOpen } = useNotificationStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const handleLogout = () => {
@@ -49,11 +55,37 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="w-64 min-h-screen bg-[#0d0e14] border-r border-white/5 flex flex-col">
-      {/* Logo */}
-      <div className="p-6 border-b border-white/5">
-        <Logo />
-      </div>
+    <>
+      {/* Mobile Sidebar Overlay Backdrop */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+          onClick={onClose}
+        />
+      )}
+
+      <aside
+        className={cn(
+          "w-64 bg-[#0d0e14] border-r border-white/5 flex flex-col transition-transform duration-300 z-50",
+          // Mobile vs Desktop responsive layout styling
+          "fixed inset-y-0 left-0 md:relative md:translate-x-0 h-screen md:flex",
+          isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        )}
+      >
+        {/* Logo and close button on mobile */}
+        <div className="p-6 border-b border-white/5 flex items-center justify-between">
+          <Logo />
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              className="md:hidden text-gray-400 hover:text-white -mr-2"
+            >
+              <X className="w-5 h-5" />
+            </Button>
+          )}
+        </div>
 
       {/* New Meeting Button */}
       <div className="p-4">
@@ -110,18 +142,31 @@ export default function Sidebar() {
         </div>
 
         {/* Recent Meetings */}
-        <Link
-          to="/dashboard"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all duration-200 group"
+        <button
+          onClick={() => {
+            navigate("/dashboard");
+            setTimeout(() => {
+              const element = document.getElementById("recent-meetings");
+              if (element) {
+                element.scrollIntoView({ behavior: "smooth" });
+              }
+            }, 100);
+          }}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all duration-200 group text-left font-medium"
         >
           <Video className="w-4 h-4 text-gray-500 group-hover:text-white" />
           Recent Meetings
-        </Link>
+        </button>
 
         {/* Notifications */}
-        <Link
-          to="/dashboard"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all duration-200 group"
+        <button
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsOpen(true);
+            navigate("/dashboard");
+          }}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all duration-200 group text-left font-medium"
         >
           <Bell className="w-4 h-4 text-gray-500 group-hover:text-white" />
           Notifications
@@ -130,7 +175,7 @@ export default function Sidebar() {
               {unreadCount}
             </span>
           )}
-        </Link>
+        </button>
       </nav>
 
       {/* Bottom Section */}
@@ -170,11 +215,11 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* New Meeting Modal */}
       <NewMeetingModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
       />
     </aside>
+    </>
   );
 }

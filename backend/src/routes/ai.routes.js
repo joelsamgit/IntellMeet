@@ -27,4 +27,12 @@ router.post(
   ctrl.processMeeting,
 );
 
+router.get("/meetings/:meetingId/transcript", ctrl.getMeetingTranscript);
+router.get("/meetings/:meetingId/summary", ctrl.getMeetingSummary);
+router.get("/meetings/:meetingId/action-items", ctrl.getMeetingActionItems);
+
+router.get("/transcript/:meetingId", ctrl.getMeetingTranscript);
+router.get("/summary/:meetingId", ctrl.getMeetingSummary);
+router.get("/action-items/:meetingId", ctrl.getMeetingActionItems);
+
 export default router;

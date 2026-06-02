@@ -21,7 +21,7 @@ export default function ParticipantsPanel({
   onClose,
 }: ParticipantsPanelProps) {
   return (
-    <div className="w-72 bg-[#0d0e14] border-l border-white/5 flex flex-col h-full">
+    <div className="fixed inset-y-0 right-0 z-40 w-72 md:relative bg-[#0d0e14] border-l border-white/5 flex flex-col h-full">
       {/* Header */}
       <div className="h-14 flex items-center justify-between px-4 border-b border-white/5">
         <h3 className="text-sm font-semibold text-white">

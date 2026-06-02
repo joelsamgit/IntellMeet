@@ -109,7 +109,7 @@ export default function MeetingCard({ meeting, onJoin, onViewSummary }: MeetingC
               Start
             </Button>
           )}
-          {meeting.status === "ended" && meeting.summary && (
+          {meeting.status === "ended" && (
             <Button
               size="sm"
               onClick={() => onViewSummary?.(meeting._id)}

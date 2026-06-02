@@ -5,7 +5,21 @@ export async function transcribeMeeting(meetingId: string, audioBlob: Blob) {
   const formData = new FormData();
   formData.append('audio', audioBlob, 'recording.webm');
 
-  const response = await api.post(`/ai/transcribe/${meetingId}`, formData, {
+  const response = await api.post(`/ai/meetings/${meetingId}/transcribe`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+  return response.data;
+}
+
+export async function processMeeting(meetingId: string, audioBlob: Blob, segments?: any[]) {
+  const formData = new FormData();
+  formData.append('audio', audioBlob, 'recording.webm');
+  if (segments) {
+    formData.append('segments', JSON.stringify(segments));
+  }
+
+  const response = await api.post(`/ai/meetings/${meetingId}/process`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 120000,
   });
@@ -13,21 +27,21 @@ export async function transcribeMeeting(meetingId: string, audioBlob: Blob) {
 }
 
 export async function summarizeMeeting(meetingId: string) {
-  const response = await api.post(`/ai/summarize/${meetingId}`);
+  const response = await api.post(`/ai/meetings/${meetingId}/summary`);
   return response.data;
 }
 
 export async function getMeetingSummary(meetingId: string): Promise<AISummary | null> {
-  const response = await api.get(`/ai/summary/${meetingId}`);
+  const response = await api.get(`/ai/meetings/${meetingId}/summary`);
   return response.data.data;
 }
 
 export async function getMeetingTranscript(meetingId: string) {
-  const response = await api.get(`/ai/transcript/${meetingId}`);
+  const response = await api.get(`/ai/meetings/${meetingId}/transcript`);
   return response.data.data;
 }
 
 export async function getActionItems(meetingId: string): Promise<MeetingActionItem[]> {
-  const response = await api.get(`/ai/action-items/${meetingId}`);
+  const response = await api.get(`/ai/meetings/${meetingId}/action-items`);
   return response.data.data;
 }

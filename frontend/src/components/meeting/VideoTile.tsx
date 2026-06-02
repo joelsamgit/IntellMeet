@@ -24,6 +24,7 @@ export default function VideoTile({
   videoRef,
   stream,
 }: VideoTileProps) {
+  const displayName = name || "Guest";
   const internalVideoRef = useRef<HTMLVideoElement>(null);
   const resolvedRef = videoRef ?? internalVideoRef;
 
@@ -32,7 +33,7 @@ export default function VideoTile({
     if (!videoElement || !stream) return;
 
     videoElement.srcObject = stream;
-  }, [resolvedRef, stream]);
+  }, [resolvedRef, stream, isVideoOff]);
 
   return (
     <div
@@ -43,31 +44,26 @@ export default function VideoTile({
       )}
     >
       {/* Video Element */}
-      {!isVideoOff && videoRef ? (
-        <video
-          ref={resolvedRef}
-          autoPlay
-          playsInline
-          muted={isLocal}
-          className="w-full h-full object-cover"
-        />
-      ) : !isVideoOff && stream ? (
-        <video
-          ref={resolvedRef}
-          autoPlay
-          playsInline
-          muted={isLocal}
-          className="w-full h-full object-cover"
-        />
-      ) : (
+      <video
+        ref={resolvedRef}
+        autoPlay
+        playsInline
+        muted={isLocal}
+        className={cn(
+          "w-full h-full object-cover",
+          (isVideoOff || !stream) && "hidden"
+        )}
+      />
+
+      {(isVideoOff || !stream) && (
         /* Avatar when video is off */
-        <div className="flex flex-col items-center gap-3">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#1a1d27] rounded-xl gap-3">
           <Avatar className="w-16 h-16">
             <AvatarFallback className="bg-indigo-600 text-white text-xl font-semibold">
-              {name.charAt(0).toUpperCase()}
+              {displayName.charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
-          <span className="text-xs text-gray-400">{name}</span>
+          <span className="text-xs text-gray-400">{displayName}</span>
         </div>
       )}
 
@@ -75,7 +71,7 @@ export default function VideoTile({
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-white">
-            {name} {isLocal && "(You)"}
+            {displayName} {isLocal && "(You)"}
           </span>
           {isSpeaking && (
             <span className="text-xs text-indigo-400 animate-pulse">

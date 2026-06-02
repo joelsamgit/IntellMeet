@@ -29,9 +29,8 @@ const typeConfig = {
 };
 
 export default function NotificationsDropdown() {
-  const { notifications, unreadCount, markAsRead, markAllAsRead } =
+  const { notifications, unreadCount, markAsRead, markAllAsRead, isOpen, setIsOpen } =
     useNotificationStore();
-  const [isOpen, setIsOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   // Close on outside click

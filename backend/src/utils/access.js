@@ -8,6 +8,7 @@ export function canAccessMeeting(meeting, userId, role) {
   const uid = String(userId);
   if (role === "admin") return true;
   if (String(meeting.host?._id || meeting.host) === uid) return true;
+  if (meeting.status === "live") return true;
   return (meeting.participants || []).some((p) => String(p?._id || p) === uid);
 }
 

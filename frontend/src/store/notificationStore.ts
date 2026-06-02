@@ -4,6 +4,8 @@ import { Notification } from '@/types';
 interface NotificationState {
   notifications: Notification[];
   unreadCount: number;
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   addNotification: (n: Notification) => void;
@@ -13,6 +15,9 @@ interface NotificationState {
 export const useNotificationStore = create<NotificationState>((set) => ({
   notifications: [],
   unreadCount: 0,
+  isOpen: false,
+
+  setIsOpen: (open) => set({ isOpen: open }),
 
   markAsRead: (id) =>
     set((state) => {

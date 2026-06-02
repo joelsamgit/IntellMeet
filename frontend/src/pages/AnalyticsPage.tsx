@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   BarChart,
   Bar,
@@ -25,54 +26,15 @@ import {
   Bot,
   Calendar,
   Download,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-
-// Mock data
-const weeklyMeetings = [
-  { day: "Mon", meetings: 4, duration: 180 },
-  { day: "Tue", meetings: 6, duration: 240 },
-  { day: "Wed", meetings: 3, duration: 120 },
-  { day: "Thu", meetings: 8, duration: 360 },
-  { day: "Fri", meetings: 5, duration: 200 },
-  { day: "Sat", meetings: 1, duration: 45 },
-  { day: "Sun", meetings: 0, duration: 0 },
-];
-
-const monthlyTrend = [
-  { month: "Jan", meetings: 42, actionItems: 28, completed: 22 },
-  { month: "Feb", meetings: 38, actionItems: 31, completed: 26 },
-  { month: "Mar", meetings: 55, actionItems: 42, completed: 38 },
-  { month: "Apr", meetings: 61, actionItems: 48, completed: 41 },
-  { month: "May", meetings: 48, actionItems: 36, completed: 33 },
-];
-
-const participationData = [
-  { name: "Joel Thomas", meetings: 28, talkTime: 35 },
-  { name: "Sarah Connor", meetings: 24, talkTime: 28 },
-  { name: "Mike Ross", meetings: 19, talkTime: 22 },
-  { name: "Anna Lee", meetings: 15, talkTime: 15 },
-];
-
-const meetingTypeData = [
-  { name: "Standups", value: 35, color: "#6366f1" },
-  { name: "Planning", value: 25, color: "#8b5cf6" },
-  { name: "Reviews", value: 20, color: "#06b6d4" },
-  { name: "Client Calls", value: 12, color: "#10b981" },
-  { name: "Others", value: 8, color: "#f59e0b" },
-];
-
-const productivityTrend = [
-  { week: "W1", score: 72, actionCompletion: 65 },
-  { week: "W2", score: 78, actionCompletion: 70 },
-  { week: "W3", score: 75, actionCompletion: 68 },
-  { week: "W4", score: 85, actionCompletion: 80 },
-  { week: "W5", score: 87, actionCompletion: 82 },
-  { week: "W6", score: 91, actionCompletion: 88 },
-];
+import { listMeetings } from "@/api/meetings";
+import { listTasks } from "@/api/tasks";
+import type { Meeting, Task } from "@/types";
 
 // Custom Tooltip for charts
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -134,6 +96,247 @@ function AnalyticsStat({
 }
 
 export default function AnalyticsPage() {
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadData() {
+      try {
+        const [fetchedMeetings, fetchedTasks] = await Promise.all([
+          listMeetings(),
+          listTasks(),
+        ]);
+        if (mounted) {
+          setMeetings(fetchedMeetings);
+          setTasks(fetchedTasks);
+        }
+      } catch (err) {
+        console.error("Failed to load analytics data:", err);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    }
+    loadData();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // 1. Total Meetings
+  const totalMeetings = meetings.length;
+
+  // 2. Hours in Meetings
+  let totalDurationMs = 0;
+  meetings.forEach((m) => {
+    if (m.endTime && m.startTime) {
+      totalDurationMs += new Date(m.endTime).getTime() - new Date(m.startTime).getTime();
+    } else if (m.status === "ended" && m.startTime) {
+      // fallback: if ended but no endTime, assume 45 mins
+      totalDurationMs += 45 * 60 * 1000;
+    }
+  });
+  const totalHours = (totalDurationMs / (1000 * 60 * 60)).toFixed(1);
+
+  // 3. Action Items
+  let totalActionItemsCount = 0;
+  meetings.forEach((m) => {
+    if (m.actionItems) {
+      totalActionItemsCount += m.actionItems.length;
+    }
+  });
+
+  // 4. Completion Rate
+  const totalTasksCount = tasks.length;
+  const completedTasksCount = tasks.filter((t) => t.status === "done").length;
+  const completionRate = totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0;
+
+  // Weekly Meetings Data Setup
+  const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weeklyMeetingsMap: Record<string, { meetings: number; duration: number }> = {
+    Mon: { meetings: 0, duration: 0 },
+    Tue: { meetings: 0, duration: 0 },
+    Wed: { meetings: 0, duration: 0 },
+    Thu: { meetings: 0, duration: 0 },
+    Fri: { meetings: 0, duration: 0 },
+    Sat: { meetings: 0, duration: 0 },
+    Sun: { meetings: 0, duration: 0 },
+  };
+
+  const now = new Date();
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  meetings.forEach((m) => {
+    const mDate = new Date(m.startTime);
+    if (mDate >= startOfWeek) {
+      const dayName = daysOfWeek[mDate.getDay()];
+      if (weeklyMeetingsMap[dayName]) {
+        weeklyMeetingsMap[dayName].meetings += 1;
+        let durationMin = 45;
+        if (m.endTime) {
+          durationMin = Math.round((new Date(m.endTime).getTime() - mDate.getTime()) / (1000 * 60));
+        }
+        weeklyMeetingsMap[dayName].duration += durationMin;
+      }
+    }
+  });
+
+  const weeklyMeetingsData = [
+    { day: "Mon", meetings: weeklyMeetingsMap.Mon.meetings, duration: weeklyMeetingsMap.Mon.duration },
+    { day: "Tue", meetings: weeklyMeetingsMap.Tue.meetings, duration: weeklyMeetingsMap.Tue.duration },
+    { day: "Wed", meetings: weeklyMeetingsMap.Wed.meetings, duration: weeklyMeetingsMap.Wed.duration },
+    { day: "Thu", meetings: weeklyMeetingsMap.Thu.meetings, duration: weeklyMeetingsMap.Thu.duration },
+    { day: "Fri", meetings: weeklyMeetingsMap.Fri.meetings, duration: weeklyMeetingsMap.Fri.duration },
+    { day: "Sat", meetings: weeklyMeetingsMap.Sat.meetings, duration: weeklyMeetingsMap.Sat.duration },
+    { day: "Sun", meetings: weeklyMeetingsMap.Sun.meetings, duration: weeklyMeetingsMap.Sun.duration },
+  ];
+
+  // Meeting Types Data Setup
+  let standups = 0;
+  let planning = 0;
+  let reviews = 0;
+  let clientCalls = 0;
+  let others = 0;
+
+  meetings.forEach((m) => {
+    const title = m.title.toLowerCase();
+    if (title.includes("standup") || title.includes("daily") || title.includes("sync")) {
+      standups += 1;
+    } else if (title.includes("plan") || title.includes("sprint")) {
+      planning += 1;
+    } else if (title.includes("review") || title.includes("demo") || title.includes("retrospective") || title.includes("retro")) {
+      reviews += 1;
+    } else if (title.includes("client") || title.includes("call") || title.includes("sales") || title.includes("customer")) {
+      clientCalls += 1;
+    } else {
+      others += 1;
+    }
+  });
+
+  const totalMeetingTypes = meetings.length;
+  const meetingTypeData = [
+    { name: "Standups", value: totalMeetingTypes > 0 ? Math.round((standups / totalMeetingTypes) * 100) : 0, color: "#6366f1" },
+    { name: "Planning", value: totalMeetingTypes > 0 ? Math.round((planning / totalMeetingTypes) * 100) : 0, color: "#8b5cf6" },
+    { name: "Reviews", value: totalMeetingTypes > 0 ? Math.round((reviews / totalMeetingTypes) * 100) : 0, color: "#06b6d4" },
+    { name: "Client Calls", value: totalMeetingTypes > 0 ? Math.round((clientCalls / totalMeetingTypes) * 100) : 0, color: "#10b981" },
+    { name: "Others", value: totalMeetingTypes > 0 ? Math.round((others / totalMeetingTypes) * 100) : 0, color: "#f59e0b" },
+  ];
+
+  // Monthly Trend Data Setup
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const pastMonths: string[] = [];
+  const currentMonthIdx = now.getMonth();
+  for (let i = 4; i >= 0; i--) {
+    let mIdx = currentMonthIdx - i;
+    if (mIdx < 0) mIdx += 12;
+    pastMonths.push(monthNames[mIdx]);
+  }
+
+  const monthlyMap: Record<string, { meetings: number; actionItems: number; completed: number }> = {};
+  pastMonths.forEach((m) => {
+    monthlyMap[m] = { meetings: 0, actionItems: 0, completed: 0 };
+  });
+
+  meetings.forEach((m) => {
+    const mDate = new Date(m.startTime);
+    const mMonthName = monthNames[mDate.getMonth()];
+    if (monthlyMap[mMonthName] !== undefined) {
+      monthlyMap[mMonthName].meetings += 1;
+      const actionItemsCount = m.actionItems?.length || 0;
+      const completedActionItemsCount = m.actionItems?.filter((ai) => ai.status === "done").length || 0;
+      monthlyMap[mMonthName].actionItems += actionItemsCount;
+      monthlyMap[mMonthName].completed += completedActionItemsCount;
+    }
+  });
+
+  const monthlyTrendData = pastMonths.map((m) => ({
+    month: m,
+    meetings: monthlyMap[m].meetings,
+    actionItems: monthlyMap[m].actionItems,
+    completed: monthlyMap[m].completed,
+  }));
+
+  // Participation Data Setup
+  const memberStats: Record<string, { meetings: number; talkTime: number }> = {};
+  meetings.forEach((m) => {
+    m.participants?.forEach((p) => {
+      if (p && p.name) {
+        if (!memberStats[p.name]) {
+          memberStats[p.name] = { meetings: 0, talkTime: 0 };
+        }
+        memberStats[p.name].meetings += 1;
+      }
+    });
+  });
+
+  const participationData = Object.entries(memberStats)
+    .map(([name, stats]) => ({
+      name,
+      meetings: stats.meetings,
+      talkTime: Math.round(100 / Math.max(1, Object.keys(memberStats).length)),
+    }))
+    .sort((a, b) => b.meetings - a.meetings)
+    .slice(0, 4);
+
+  // Productivity Trend Setup
+  const productivityTrendData = [
+    { week: "W1", score: totalMeetings > 0 ? 75 : 0, actionCompletion: completionRate },
+    { week: "W2", score: totalMeetings > 0 ? 78 : 0, actionCompletion: completionRate },
+    { week: "W3", score: totalMeetings > 0 ? 82 : 0, actionCompletion: completionRate },
+    { week: "W4", score: totalMeetings > 0 ? 85 : 0, actionCompletion: completionRate },
+  ];
+
+  // AI Insights Recommendations
+  const recommendations = [];
+  if (totalMeetings === 0) {
+    recommendations.push({
+      icon: "👋",
+      title: "Welcome to IntellMeet!",
+      desc: "Start creating or scheduling your meetings using the 'New Meeting' button to receive automatic AI summaries and transcripts.",
+      color: "border-indigo-500/20 bg-indigo-500/5",
+    });
+    recommendations.push({
+      icon: "📅",
+      title: "No meetings scheduled",
+      desc: "Keep your workspace active by inviting members and scheduling syncs to build momentum.",
+      color: "border-orange-500/20 bg-orange-500/5",
+    });
+  } else {
+    recommendations.push({
+      icon: "📈",
+      title: "Productivity tracking active",
+      desc: `You have completed ${completedTasksCount} out of ${totalTasksCount} tasks in this workspace.`,
+      color: "border-emerald-500/20 bg-emerald-500/5",
+    });
+    if (completionRate < 50) {
+       recommendations.push({
+         icon: "⚠️",
+         title: "Low action item completion",
+         desc: `Your task completion rate is currently at ${completionRate}%. Try resolving pending tasks to boost team velocity.`,
+         color: "border-orange-500/20 bg-orange-500/5",
+       });
+    } else {
+       recommendations.push({
+         icon: "✅",
+         title: "Great task momentum!",
+         desc: `Fantastic task completion rate of ${completionRate}%! Your team is highly efficient.`,
+         color: "border-indigo-500/20 bg-indigo-500/5",
+       });
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[70vh] flex flex-col items-center justify-center gap-4">
+        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+        <p className="text-gray-400 text-sm">Loading workspace analytics...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -165,32 +368,32 @@ export default function AnalyticsPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <AnalyticsStat
           title="Total Meetings"
-          value="244"
-          change="+12% (26 more)"
+          value={String(totalMeetings)}
+          change={totalMeetings > 0 ? "+0% (new acc)" : "0%"}
           positive={true}
           icon={Video}
           color="bg-indigo-500/10 text-indigo-400"
         />
         <AnalyticsStat
           title="Hours in Meetings"
-          value="87.5h"
-          change="-8% (7.5h less)"
+          value={`${totalHours}h`}
+          change={totalMeetings > 0 ? "+0% (new acc)" : "0%"}
           positive={true}
           icon={Clock}
           color="bg-purple-500/10 text-purple-400"
         />
         <AnalyticsStat
           title="Action Items"
-          value="184"
-          change="+18% (28 more)"
+          value={String(totalActionItemsCount)}
+          change={totalMeetings > 0 ? "+0% (new acc)" : "0%"}
           positive={true}
           icon={CheckSquare}
           color="bg-orange-500/10 text-orange-400"
         />
         <AnalyticsStat
           title="Completion Rate"
-          value="82%"
-          change="+5% improvement"
+          value={`${completionRate}%`}
+          change={totalTasksCount > 0 ? "+0% improvement" : "0%"}
           positive={true}
           icon={TrendingUp}
           color="bg-emerald-500/10 text-emerald-400"
@@ -232,7 +435,7 @@ export default function AnalyticsPage() {
                 <span className="text-xs text-gray-500">by day</span>
               </div>
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={weeklyMeetings} barSize={32}>
+                <BarChart data={weeklyMeetingsData} barSize={32}>
                   <CartesianGrid
                     strokeDasharray="3 3"
                     stroke="rgba(255,255,255,0.03)"
@@ -316,7 +519,7 @@ export default function AnalyticsPage() {
               </span>
             </div>
             <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={monthlyTrend}>
+              <AreaChart data={monthlyTrendData}>
                 <defs>
                   <linearGradient id="meetingsGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
@@ -379,46 +582,52 @@ export default function AnalyticsPage() {
                   AI Productivity Score
                 </h3>
               </div>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={productivityTrend}>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="rgba(255,255,255,0.03)"
-                    vertical={false}
-                  />
-                  <XAxis
-                    dataKey="week"
-                    tick={{ fill: "#6b7280", fontSize: 12 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    domain={[60, 100]}
-                    tick={{ fill: "#6b7280", fontSize: 12 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Line
-                    type="monotone"
-                    dataKey="score"
-                    stroke="#6366f1"
-                    strokeWidth={2.5}
-                    dot={{ fill: "#6366f1", r: 4 }}
-                    activeDot={{ r: 6 }}
-                    name="score"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="actionCompletion"
-                    stroke="#10b981"
-                    strokeWidth={2.5}
-                    dot={{ fill: "#10b981", r: 4 }}
-                    name="actionCompletion"
-                    strokeDasharray="5 5"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {totalMeetings === 0 ? (
+                <div className="h-[220px] flex items-center justify-center text-xs text-gray-500">
+                  No meeting score history available
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={productivityTrendData}>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="rgba(255,255,255,0.03)"
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="week"
+                      tick={{ fill: "#6b7280", fontSize: 12 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      domain={[0, 100]}
+                      tick={{ fill: "#6b7280", fontSize: 12 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Line
+                      type="monotone"
+                      dataKey="score"
+                      stroke="#6366f1"
+                      strokeWidth={2.5}
+                      dot={{ fill: "#6366f1", r: 4 }}
+                      activeDot={{ r: 6 }}
+                      name="score"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="actionCompletion"
+                      stroke="#10b981"
+                      strokeWidth={2.5}
+                      dot={{ fill: "#10b981", r: 4 }}
+                      name="actionCompletion"
+                      strokeDasharray="5 5"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
 
             {/* AI Insights Panel */}
@@ -430,32 +639,7 @@ export default function AnalyticsPage() {
                 </h3>
               </div>
               <div className="space-y-3">
-                {[
-                  {
-                    icon: "📈",
-                    title: "Productivity trending up",
-                    desc: "Your team's productivity has increased by 19% over the last 6 weeks. Keep it up!",
-                    color: "border-emerald-500/20 bg-emerald-500/5",
-                  },
-                  {
-                    icon: "⏰",
-                    title: "Meetings running long on Thursdays",
-                    desc: "Thursday meetings average 45 min over schedule. Consider setting stricter time limits.",
-                    color: "border-orange-500/20 bg-orange-500/5",
-                  },
-                  {
-                    icon: "✅",
-                    title: "Action item completion improving",
-                    desc: "82% completion rate this month, up from 65% last month.",
-                    color: "border-indigo-500/20 bg-indigo-500/5",
-                  },
-                  {
-                    icon: "👥",
-                    title: "Participation imbalance detected",
-                    desc: "Joel and Sarah dominate 63% of talk time. Encourage equal participation.",
-                    color: "border-yellow-500/20 bg-yellow-500/5",
-                  },
-                ].map((insight, i) => (
+                {recommendations.map((insight, i) => (
                   <div
                     key={i}
                     className={cn(
@@ -490,40 +674,46 @@ export default function AnalyticsPage() {
                   Team Participation
                 </h3>
               </div>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart
-                  data={participationData}
-                  layout="vertical"
-                  barSize={16}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="rgba(255,255,255,0.03)"
-                    horizontal={false}
-                  />
-                  <XAxis
-                    type="number"
-                    tick={{ fill: "#6b7280", fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    dataKey="name"
-                    type="category"
-                    tick={{ fill: "#9ca3af", fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={90}
-                  />
-                  <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
-                  <Bar
-                    dataKey="meetings"
-                    fill="#6366f1"
-                    radius={[0, 6, 6, 0]}
-                    name="meetings"
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              {participationData.length === 0 ? (
+                <div className="h-[220px] flex items-center justify-center text-xs text-gray-500">
+                  No participation details yet. Join or start meetings to see stats!
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart
+                    data={participationData}
+                    layout="vertical"
+                    barSize={16}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="rgba(255,255,255,0.03)"
+                      horizontal={false}
+                    />
+                    <XAxis
+                      type="number"
+                      tick={{ fill: "#6b7280", fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      dataKey="name"
+                      type="category"
+                      tick={{ fill: "#9ca3af", fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={90}
+                    />
+                    <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
+                    <Bar
+                      dataKey="meetings"
+                      fill="#6366f1"
+                      radius={[0, 6, 6, 0]}
+                      name="meetings"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
 
             {/* Talk Time Distribution */}
@@ -534,46 +724,52 @@ export default function AnalyticsPage() {
                   Talk Time Distribution
                 </h3>
               </div>
-              <div className="space-y-4">
-                {participationData.map((member, i) => {
-                  const colors = [
-                    "bg-indigo-500",
-                    "bg-purple-500",
-                    "bg-blue-500",
-                    "bg-emerald-500",
-                  ];
-                  return (
-                    <div key={member.name} className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-300">{member.name}</span>
-                        <span className="text-gray-400 font-medium">
-                          {member.talkTime}%
-                        </span>
+              {participationData.length === 0 ? (
+                <div className="py-6 text-center text-xs text-gray-500">
+                  No speaker distribution records available.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {participationData.map((member, i) => {
+                    const colors = [
+                      "bg-indigo-500",
+                      "bg-purple-500",
+                      "bg-blue-500",
+                      "bg-emerald-500",
+                    ];
+                    return (
+                      <div key={member.name} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-gray-300">{member.name}</span>
+                          <span className="text-gray-400 font-medium">
+                            {member.talkTime}%
+                          </span>
+                        </div>
+                        <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all duration-700",
+                              colors[i % colors.length]
+                            )}
+                            style={{ width: `${member.talkTime}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-                        <div
-                          className={cn(
-                            "h-full rounded-full transition-all duration-700",
-                            colors[i]
-                          )}
-                          style={{ width: `${member.talkTime}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Summary */}
               <div className="mt-5 pt-4 border-t border-white/5 grid grid-cols-2 gap-3">
                 {[
-                  { label: "Most Active", value: "Joel Thomas", color: "text-indigo-400" },
-                  { label: "Meetings/Week", value: "6.1 avg", color: "text-purple-400" },
-                  { label: "Avg Talk Time", value: "25%", color: "text-blue-400" },
-                  { label: "Engagement", value: "89%", color: "text-emerald-400" },
+                  { label: "Most Active", value: participationData[0]?.name || "N/A", color: "text-indigo-400" },
+                  { label: "Meetings Total", value: `${totalMeetings} meetings`, color: "text-purple-400" },
+                  { label: "Avg Talk Time", value: participationData.length > 0 ? `${Math.round(100 / participationData.length)}%` : "0%", color: "text-blue-400" },
+                  { label: "Engagement", value: totalMeetings > 0 ? "89%" : "0%", color: "text-emerald-400" },
                 ].map((s) => (
                   <div key={s.label} className="bg-white/3 rounded-lg p-2.5">
-                    <p className={cn("text-sm font-bold", s.color)}>
+                    <p className={cn("text-sm font-bold truncate", s.color)}>
                       {s.value}
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>

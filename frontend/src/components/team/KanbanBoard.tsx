@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -16,13 +16,23 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Plus, MoreHorizontal, GripVertical, Clock, User } from "lucide-react";
+import { Plus, MoreHorizontal, GripVertical, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { Task } from "@/types";
+import { Task, User } from "@/types";
 import { toast } from "sonner";
+import { listTasks, createTask, updateTask } from "@/api/tasks";
+import { listAllUsers } from "@/api/users";
 
 // Column definitions
 const columns = [
@@ -51,66 +61,6 @@ const priorityConfig = {
   medium: "bg-orange-500/15 text-orange-400 border-orange-500/20",
   low: "bg-gray-500/15 text-gray-400 border-gray-500/20",
 };
-
-// Initial tasks
-const initialTasks: Task[] = [
-  {
-    _id: "t1",
-    title: "Build authentication module",
-    description: "JWT login, signup, refresh tokens",
-    assignee: { _id: "u2", name: "Sarah Connor", email: "sarah@example.com", role: "member" },
-    status: "done",
-    priority: "high",
-  },
-  {
-    _id: "t2",
-    title: "API integration for meetings",
-    description: "Connect frontend to backend meeting endpoints",
-    assignee: { _id: "u3", name: "Mike Ross", email: "mike@example.com", role: "member" },
-    status: "inprogress",
-    priority: "high",
-  },
-  {
-    _id: "t3",
-    title: "Dashboard UI components",
-    description: "Stats cards, meeting list, charts",
-    assignee: { _id: "u2", name: "Sarah Connor", email: "sarah@example.com", role: "member" },
-    status: "inprogress",
-    priority: "medium",
-  },
-  {
-    _id: "t4",
-    title: "Mobile responsive fixes",
-    description: "Fix layout issues on mobile screens",
-    assignee: { _id: "u4", name: "Anna Lee", email: "anna@example.com", role: "member" },
-    status: "todo",
-    priority: "medium",
-  },
-  {
-    _id: "t5",
-    title: "WebRTC video integration",
-    description: "Peer connection, media streams",
-    assignee: { _id: "u1", name: "Joel Thomas", email: "joel@example.com", role: "admin" },
-    status: "todo",
-    priority: "high",
-  },
-  {
-    _id: "t6",
-    title: "AI transcription setup",
-    description: "Integrate OpenAI Whisper API",
-    assignee: { _id: "u1", name: "Joel Thomas", email: "joel@example.com", role: "admin" },
-    status: "todo",
-    priority: "medium",
-  },
-  {
-    _id: "t7",
-    title: "Write API documentation",
-    description: "Document all REST endpoints",
-    assignee: { _id: "u3", name: "Mike Ross", email: "mike@example.com", role: "member" },
-    status: "done",
-    priority: "low",
-  },
-];
 
 // Single Task Card Component
 function TaskCard({
@@ -144,7 +94,6 @@ function TaskCard({
         isDragging && "shadow-2xl shadow-black/50 rotate-1 scale-105"
       )}
     >
-      {/* Drag Handle + Menu */}
       <div className="flex items-start justify-between gap-2">
         <div
           {...attributes}
@@ -161,19 +110,17 @@ function TaskCard({
         </button>
       </div>
 
-      {/* Description */}
       {task.description && (
         <p className="text-xs text-gray-500 leading-relaxed pl-5">
           {task.description}
         </p>
       )}
 
-      {/* Footer */}
       <div className="flex items-center justify-between pl-5">
         <Badge
           className={cn(
             "text-xs border capitalize",
-            priorityConfig[task.priority as keyof typeof priorityConfig]
+            priorityConfig[task.priority as keyof typeof priorityConfig] || priorityConfig.medium
           )}
         >
           {task.priority}
@@ -181,7 +128,7 @@ function TaskCard({
         {task.assignee && (
           <Avatar className="w-6 h-6">
             <AvatarFallback className="bg-indigo-600 text-white text-[10px] font-medium">
-              {task.assignee.name.charAt(0)}
+              {task.assignee.name.charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
         )}
@@ -194,9 +141,11 @@ function TaskCard({
 function KanbanColumn({
   column,
   tasks,
+  onAddTask,
 }: {
   column: (typeof columns)[0];
   tasks: Task[];
+  onAddTask: (status: string) => void;
 }) {
   return (
     <div className="flex-1 min-w-[280px] max-w-[340px] flex flex-col gap-3">
@@ -209,7 +158,10 @@ function KanbanColumn({
             {tasks.length}
           </span>
         </div>
-        <button className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-white hover:bg-white/5 transition-colors">
+        <button
+          onClick={() => onAddTask(column.id)}
+          className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-white hover:bg-white/5 transition-colors"
+        >
           <Plus className="w-4 h-4" />
         </button>
       </div>
@@ -243,14 +195,49 @@ function KanbanColumn({
 }
 
 export default function KanbanBoard() {
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+
+  // New task modal fields
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newPriority, setNewPriority] = useState<"low" | "medium" | "high">("medium");
+  const [newAssignee, setNewAssignee] = useState("");
+  const [newStatus, setNewStatus] = useState("todo");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
     })
   );
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadData() {
+      try {
+        const [fetchedTasks, fetchedUsers] = await Promise.all([
+          listTasks(),
+          listAllUsers().catch(() => []),
+        ]);
+        if (mounted) {
+          setTasks(fetchedTasks);
+          setUsers(fetchedUsers);
+        }
+      } catch (err) {
+        console.error("Failed to load Kanban board data:", err);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    }
+    loadData();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const getTasksByStatus = (status: string) =>
     tasks.filter((t) => t.status === status);
@@ -267,7 +254,6 @@ export default function KanbanBoard() {
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    // Check if dropped over a column
     const overColumn = columns.find((c) => c.id === overId);
     if (overColumn) {
       setTasks((prev) =>
@@ -280,7 +266,7 @@ export default function KanbanBoard() {
     }
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveTask(null);
 
@@ -289,13 +275,13 @@ export default function KanbanBoard() {
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    // Find target column from over task or column id
     const overTask = tasks.find((t) => t._id === overId);
     const targetStatus = overTask
       ? overTask.status
       : columns.find((c) => c.id === overId)?.id;
 
     if (targetStatus) {
+      // Optimistically update status
       setTasks((prev) =>
         prev.map((t) =>
           t._id === activeId
@@ -303,32 +289,193 @@ export default function KanbanBoard() {
             : t
         )
       );
-      toast.success("Task moved successfully!");
+
+      try {
+        await updateTask(activeId, { status: targetStatus as Task["status"] });
+        toast.success("Task updated successfully!");
+      } catch (err) {
+        toast.error("Failed to persist task status update");
+        console.error(err);
+      }
     }
   };
 
-  return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCorners}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
-    >
-      <div className="flex gap-5 overflow-x-auto pb-4">
-        {columns.map((column) => (
-          <KanbanColumn
-            key={column.id}
-            column={column}
-            tasks={getTasksByStatus(column.id)}
-          />
-        ))}
-      </div>
+  const openAddTask = (status: string) => {
+    setNewStatus(status);
+    setIsModalOpen(true);
+  };
 
-      {/* Drag Overlay */}
-      <DragOverlay>
-        {activeTask && <TaskCard task={activeTask} isDragging />}
-      </DragOverlay>
-    </DndContext>
+  const handleCreateTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim()) {
+      toast.error("Task title is required");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const res = await createTask({
+        title: newTitle.trim(),
+        description: newDesc.trim(),
+        priority: newPriority,
+        status: newStatus as any,
+        assigneeId: newAssignee || undefined,
+      });
+
+      setTasks((prev) => [res.task, ...prev]);
+      toast.success("Task created successfully!");
+      setIsModalOpen(false);
+
+      // Reset
+      setNewTitle("");
+      setNewDesc("");
+      setNewPriority("medium");
+      setNewAssignee("");
+    } catch (err) {
+      toast.error("Failed to create task");
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[200px] flex flex-col items-center justify-center gap-4">
+        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+        <p className="text-gray-400 text-sm">Loading task board...</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCorners}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex gap-5 overflow-x-auto pb-4">
+          {columns.map((column) => (
+            <KanbanColumn
+              key={column.id}
+              column={column}
+              tasks={getTasksByStatus(column.id)}
+              onAddTask={openAddTask}
+            />
+          ))}
+        </div>
+
+        {/* Drag Overlay */}
+        <DragOverlay>
+          {activeTask && <TaskCard task={activeTask} isDragging />}
+        </DragOverlay>
+      </DndContext>
+
+      {/* Add Task Modal */}
+      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <DialogContent className="bg-[#13141a] border border-white/10 text-white max-w-md p-6">
+          <DialogHeader className="p-0 mb-4">
+            <DialogTitle className="text-lg font-bold text-white">
+              Create New Task
+            </DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateTask} className="space-y-4">
+            {/* Title */}
+            <div className="space-y-1.5">
+              <Label htmlFor="task-title" className="text-gray-300 text-sm">Title</Label>
+              <Input
+                id="task-title"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="e.g. Write API integration"
+                className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-indigo-500 h-10"
+              />
+            </div>
+
+            {/* Description */}
+            <div className="space-y-1.5">
+              <Label htmlFor="task-desc" className="text-gray-300 text-sm">Description</Label>
+              <Input
+                id="task-desc"
+                value={newDesc}
+                onChange={(e) => setNewDesc(e.target.value)}
+                placeholder="Briefly describe the task objectives"
+                className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-indigo-500 h-10"
+              />
+            </div>
+
+            {/* Priority */}
+            <div className="space-y-1.5">
+              <Label className="text-gray-300 text-sm">Priority</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {["low", "medium", "high"].map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setNewPriority(p as any)}
+                    className={cn(
+                      "py-2 text-xs border rounded-lg capitalize font-medium transition-all duration-200",
+                      newPriority === p
+                        ? "bg-indigo-600 border-indigo-600 text-white"
+                        : "border-white/10 text-gray-400 hover:text-white"
+                    )}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Assignee */}
+            <div className="space-y-1.5">
+              <Label htmlFor="task-assignee" className="text-gray-300 text-sm">Assignee</Label>
+              <select
+                id="task-assignee"
+                value={newAssignee}
+                onChange={(e) => setNewAssignee(e.target.value)}
+                className="w-full bg-[#13141a] border border-white/10 text-gray-300 rounded-lg p-2.5 text-sm focus:border-indigo-500 h-10"
+              >
+                <option value="">Unassigned</option>
+                {users.map((u) => (
+                  <option key={u._id} value={u._id}>
+                    {u.name} ({u.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex gap-3 pt-2">
+              <Button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                variant="outline"
+                className="flex-1 border-white/10 bg-transparent text-gray-300 hover:bg-white/5"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  "Create Task"
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

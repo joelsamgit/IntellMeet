@@ -8,10 +8,11 @@ import * as cache from "../services/cache.service.js";
 import { notifyUsers } from "../services/notification.service.js";
 
 function findMeetingByParam(idOrCode) {
-  if (isValidObjectId(idOrCode)) {
-    return Meeting.findById(idOrCode);
+  const clean = String(idOrCode || "").trim().toLowerCase().replace(/[\s_]+/g, "-");
+  if (isValidObjectId(clean)) {
+    return Meeting.findById(clean);
   }
-  return Meeting.findOne({ meetingCode: String(idOrCode).toLowerCase() });
+  return Meeting.findOne({ meetingCode: clean });
 }
 
 function canAccessMeeting(meeting, userId, role) {
@@ -94,6 +95,16 @@ export const getMeeting = asyncHandler(async (req, res) => {
   if (!canAccessMeeting(m, req.user._id, req.user.role)) {
     throw new AppError("Meeting not found", 404);
   }
+
+  // Automatically register participant if the meeting is live
+  const uid = String(req.user._id);
+  const isParticipant = (m.participants || []).some((p) => String(p?._id || p) === uid);
+  if (!isParticipant && m.status === "live") {
+    m.participants.push(req.user._id);
+    await m.save();
+    await cache.invalidateMeetingCache(String(m._id));
+  }
+
   const cacheKey = String(m._id);
   const cached = await cache.getCachedMeeting(cacheKey);
   if (cached) {

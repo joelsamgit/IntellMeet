@@ -1,0 +1,36 @@
+import api from './axios';
+
+export const listTeams = async () => {
+  const response = await api.get('/teams');
+  return response.data.teams || [];
+};
+
+export const createTeam = async (data: {
+  name: string;
+  projects?: Array<{ name: string; description?: string }>;
+}) => {
+  const response = await api.post('/teams', data);
+  return response.data;
+};
+
+export const getTeamDetails = async (id: string) => {
+  const response = await api.get(`/teams/${id}`);
+  return response.data.team;
+};
+
+export const updateTeam = async (
+  id: string,
+  data: Partial<{
+    name: string;
+    projects: Array<{ name: string; description?: string }>;
+    memberIds: string[];
+  }>
+) => {
+  const response = await api.put(`/teams/${id}`, data);
+  return response.data;
+};
+
+export const deleteTeam = async (id: string) => {
+  const response = await api.delete(`/teams/${id}`);
+  return response.data;
+};
