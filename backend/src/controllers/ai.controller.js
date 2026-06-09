@@ -159,6 +159,37 @@ export const processMeeting = asyncHandler(async (req, res) => {
     } catch (err) {
       console.warn('[ai.controller] Groq Whisper failed, activating resilient fallback transcript:', err.message);
     }
+
+    try {
+      if (process.env.CLOUDINARY_CLOUD_NAME) {
+        console.log(`[ai.controller] Uploading recording to Cloudinary...`);
+        const { uploadBuffer } = await import("../services/cloudinary.service.js");
+        const up = await uploadBuffer(req.file.buffer, "intellmeet/recordings", req.file.originalname);
+        meeting.recording = up.url;
+        console.log(`[ai.controller] Uploaded to Cloudinary: ${up.url}`);
+      } else {
+        // Fallback to local storage if Cloudinary not configured
+        const path = await import("path");
+        const fs = await import("fs");
+        const { fileURLToPath } = await import("url");
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
+        
+        const dir = path.join(__dirname, "../uploads/recordings");
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        
+        const filename = `${Date.now()}-${req.file.originalname || "recording.webm"}`;
+        const filePath = path.join(dir, filename);
+        await fs.promises.writeFile(filePath, req.file.buffer);
+        
+        meeting.recording = `/uploads/recordings/${filename}`;
+        console.log(`[ai.controller] Saved recording locally: ${meeting.recording}`);
+      }
+    } catch (saveErr) {
+      console.error('[ai.controller] failed to save meeting recording:', saveErr.message);
+    }
   } else {
     transcript = (req.body.transcript || req.body.text || "").trim();
   }

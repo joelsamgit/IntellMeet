@@ -16,6 +16,10 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
     title: "Analytics",
     subtitle: "Track your meeting productivity.",
   },
+  "/settings": {
+    title: "Settings",
+    subtitle: "Manage your account and app preferences.",
+  },
 };
 
 export default function MainLayout() {

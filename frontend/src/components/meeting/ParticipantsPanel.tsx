@@ -1,6 +1,11 @@
-import { X, Mic, MicOff, Video, VideoOff, Crown, MoreVertical } from "lucide-react";
+import { X, Mic, MicOff, Video, VideoOff, Crown, MoreVertical, Loader2 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { inviteMember } from "@/api/teams";
+import { toast } from "sonner";
 
 interface Participant {
   id: string;
@@ -20,6 +25,25 @@ export default function ParticipantsPanel({
   participants,
   onClose,
 }: ParticipantsPanelProps) {
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [isInviting, setIsInviting] = useState(false);
+
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    setIsInviting(true);
+    try {
+      await inviteMember(inviteEmail.trim());
+      toast.success(`Invitation sent to ${inviteEmail}`);
+      setInviteEmail("");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to send invitation.");
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
   return (
     <div className="fixed inset-y-0 right-0 z-40 w-72 md:relative bg-[#0d0e14] border-l border-white/5 flex flex-col h-full">
       {/* Header */}
@@ -37,6 +61,34 @@ export default function ParticipantsPanel({
           <X className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Invite to Team Section */}
+      <form onSubmit={handleInvite} className="p-4 border-b border-white/5 space-y-2">
+        <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+          Invite to Team
+        </label>
+        <div className="flex gap-1.5">
+          <Input
+            type="email"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            placeholder="Enter member's email..."
+            className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 text-xs h-9 flex-1"
+          />
+          <Button
+            type="submit"
+            disabled={isInviting || !inviteEmail.trim()}
+            size="sm"
+            className="h-9 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 shadow-lg shadow-indigo-500/10"
+          >
+            {isInviting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              "Invite"
+            )}
+          </Button>
+        </div>
+      </form>
 
       {/* List */}
       <div className="flex-1 overflow-y-auto p-3 space-y-1">

@@ -2,9 +2,13 @@ import api from './axios';
 import type { User } from '../types';
 
 export const listAllUsers = async (): Promise<User[]> => {
-  const response = await api.get('/users/all');
-  // Admin route might return error for members, so wrap in try-catch in pages
-  return response.data.users || [];
+  try {
+    const response = await api.get('/users/all');
+    return response.data.users || [];
+  } catch (err) {
+    console.error("Failed to list all users:", err);
+    return [];
+  }
 };
 
 export const getUserProfile = async (): Promise<User> => {

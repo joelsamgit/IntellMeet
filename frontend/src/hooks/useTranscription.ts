@@ -17,7 +17,7 @@ export function useTranscription(meetingId: string, isMuted: boolean = false) {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const [transcriptLines, setTranscriptLines] = useState<TranscriptLine[]>([]);
-  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(true);
   const [interimText, setInterimText] = useState('');
   const [aiProgress, setAiProgress] = useState<AIProgress | null>(null);
   const [recognitionStatus, setRecognitionStatus] = useState('Idle');
@@ -252,7 +252,6 @@ export function useTranscription(meetingId: string, isMuted: boolean = false) {
   }, [isTranscribing, isMuted, setInterimText, setRecognitionStatus, stopAudioAnalyzer]);
 
   const startRecording = useCallback(async (stream?: MediaStream | null) => {
-    setIsTranscribing(true);
     if (!stream) {
       console.warn('[transcription] startRecording: no stream provided, live recognition active but recording is disabled.');
       return;
@@ -301,7 +300,6 @@ export function useTranscription(meetingId: string, isMuted: boolean = false) {
     stopAudioAnalyzer();
     const recorder = recorderRef.current;
     if (!recorder) {
-      setIsTranscribing(false);
       return null;
     }
 
@@ -312,7 +310,6 @@ export function useTranscription(meetingId: string, isMuted: boolean = false) {
           : null;
         chunksRef.current = [];
         recorderRef.current = null;
-        setIsTranscribing(false);
         resolve(blob);
       };
     });
@@ -320,7 +317,6 @@ export function useTranscription(meetingId: string, isMuted: boolean = false) {
     try {
       recorder.stop();
     } catch (e) {
-      setIsTranscribing(false);
       return null;
     }
     return finished;
@@ -411,5 +407,7 @@ export function useTranscription(meetingId: string, isMuted: boolean = false) {
     startRecording,
     stopRecording,
     applyTranscriptionResult,
+    startAudioAnalyzer,
+    stopAudioAnalyzer,
   };
 }

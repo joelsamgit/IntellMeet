@@ -10,6 +10,7 @@ interface VideoTileProps {
   isSpeaking?: boolean;
   isLocal?: boolean;
   isPinned?: boolean;
+  onPin?: () => void;
   videoRef?: React.RefObject<HTMLVideoElement | null>;
   stream?: MediaStream | null;
 }
@@ -21,6 +22,7 @@ export default function VideoTile({
   isSpeaking = false,
   isLocal = false,
   isPinned = false,
+  onPin,
   videoRef,
   stream,
 }: VideoTileProps) {
@@ -94,8 +96,14 @@ export default function VideoTile({
 
       {/* Hover Actions */}
       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-        <button className="w-6 h-6 bg-black/60 rounded-md flex items-center justify-center hover:bg-black/80 transition-colors">
-          <Pin className="w-3 h-3 text-white" />
+        <button 
+          onClick={onPin}
+          className={cn(
+            "w-6 h-6 rounded-md flex items-center justify-center hover:bg-black/80 transition-colors",
+            isPinned ? "bg-yellow-500 hover:bg-yellow-600" : "bg-black/60"
+          )}
+        >
+          <Pin className={cn("w-3 h-3 text-white", isPinned && "fill-white")} />
         </button>
         {!isLocal && (
           <button className="w-6 h-6 bg-black/60 rounded-md flex items-center justify-center hover:bg-black/80 transition-colors">

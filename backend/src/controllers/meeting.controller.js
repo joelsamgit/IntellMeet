@@ -48,6 +48,17 @@ export const createMeeting = asyncHandler(async (req, res) => {
   }
   const hostId = String(req.user._id);
   const extra = (req.body.participantIds || []).map(String);
+
+  if (req.body.participantEmails) {
+    const emails = Array.isArray(req.body.participantEmails)
+      ? req.body.participantEmails
+      : String(req.body.participantEmails).split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+    if (emails.length > 0) {
+      const invitedUsers = await User.find({ email: { $in: emails } });
+      invitedUsers.forEach(u => extra.push(u._id.toString()));
+    }
+  }
+
   const participantIds = [...new Set([hostId, ...extra])];
   const meeting = await Meeting.create({
     title: req.body.title,
@@ -96,8 +107,17 @@ export const getMeeting = asyncHandler(async (req, res) => {
     throw new AppError("Meeting not found", 404);
   }
 
-  // Automatically register participant if the meeting is live
   const uid = String(req.user._id);
+  const isHost = String(m.host._id || m.host) === uid;
+
+  if (m.status === "scheduled" && isHost) {
+    m.status = "live";
+    m.startTime = new Date();
+    await m.save();
+    await cache.invalidateMeetingCache(String(m._id));
+  }
+
+  // Automatically register participant if the meeting is live
   const isParticipant = (m.participants || []).some((p) => String(p?._id || p) === uid);
   if (!isParticipant && m.status === "live") {
     m.participants.push(req.user._id);
@@ -138,9 +158,19 @@ export const updateMeeting = asyncHandler(async (req, res) => {
   if (status !== undefined) m.status = status;
   if (summary !== undefined) m.summary = summary;
   if (recording !== undefined) m.recording = recording;
-  if (participantIds !== undefined) {
+  if (participantIds !== undefined || req.body.participantEmails !== undefined) {
     const hostId = String(m.host);
-    const next = [...new Set([hostId, ...participantIds.map(String)])];
+    const extra = (participantIds || []).map(String);
+    if (req.body.participantEmails) {
+      const emails = Array.isArray(req.body.participantEmails)
+        ? req.body.participantEmails
+        : String(req.body.participantEmails).split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+      if (emails.length > 0) {
+        const invitedUsers = await User.find({ email: { $in: emails } });
+        invitedUsers.forEach(u => extra.push(u._id.toString()));
+      }
+    }
+    const next = [...new Set([hostId, ...extra])];
     m.participants = next;
   }
   await m.save();

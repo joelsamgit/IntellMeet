@@ -85,6 +85,8 @@ function MeetingRoomContent() {
     startRecording,
     stopRecording,
     applyTranscriptionResult,
+    startAudioAnalyzer,
+    stopAudioAnalyzer,
   } = useTranscription(meetingId || '', isMuted);
 
   // Local state
@@ -93,7 +95,9 @@ function MeetingRoomContent() {
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [duration, setDuration] = useState(0);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
+  const recordingBlobRef = useRef<Blob | null>(null);
 
   // Initialize media on mount
   useEffect(() => {
@@ -131,18 +135,13 @@ function MeetingRoomContent() {
     return () => clearInterval(timer);
   }, []);
 
-  // Start transcription recording when joined
+  // Start audio analyzer when joined
   useEffect(() => {
-    if (isJoined) {
-      if (!isTranscribing) {
-        console.log('[meeting] joined room, starting transcription');
-        startRecording(localStream);
-      } else if (localStream) {
-        // If we are already transcribing (live speech is active), but we just got localStream, start recording it
-        startRecording(localStream);
-      }
+    if (isJoined && localStream) {
+      console.log('[meeting] joined room, starting audio analyzer');
+      startAudioAnalyzer(localStream);
     }
-  }, [isJoined, localStream, isTranscribing, startRecording]);
+  }, [isJoined, localStream, startAudioAnalyzer]);
 
   const formatDuration = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -182,8 +181,24 @@ function MeetingRoomContent() {
   };
 
   const handleToggleRecording = () => {
-    setIsRecording(!isRecording);
-    toast.info(isRecording ? "Recording stopped" : "Recording started");
+    if (isRecording) {
+      void stopRecording().then((blob) => {
+        if (blob) {
+          recordingBlobRef.current = blob;
+          toast.success("Recording saved successfully!");
+        }
+      });
+      setIsRecording(false);
+      toast.info("Recording stopped");
+    } else {
+      if (localStream) {
+        void startRecording(localStream);
+        setIsRecording(true);
+        toast.info("Recording started");
+      } else {
+        toast.error("Cannot start recording: No audio stream available.");
+      }
+    }
   };
 
   const handleSendMessage = (text: string) => {
@@ -193,7 +208,9 @@ function MeetingRoomContent() {
   const handleLeaveMeeting = () => {
     toast.info("Leaving meeting...");
     leaveRoom();
-    void stopRecording();
+    if (isRecording) {
+      void stopRecording();
+    }
     navigate("/dashboard");
   };
 
@@ -202,8 +219,14 @@ function MeetingRoomContent() {
 
     leaveRoom();
 
-    // Stop transcription and upload audio
-    const audioBlob = await stopRecording();
+    // Stop recording if active, otherwise retrieve the saved recording blob
+    let audioBlob = null;
+    if (isRecording) {
+      audioBlob = await stopRecording();
+    } else {
+      audioBlob = recordingBlobRef.current;
+    }
+
     if (audioBlob && meetingId) {
       try {
         await processMeeting(meetingId, audioBlob, transcriptLines);
@@ -290,6 +313,36 @@ function MeetingRoomContent() {
     );
   }
 
+  if (meeting?.status === "scheduled") {
+    return (
+      <div className="h-screen bg-[#0a0b0f] flex items-center justify-center p-6 text-white text-center">
+        <div className="max-w-md w-full bg-[#13141a] border border-white/5 rounded-2xl p-8 space-y-6 shadow-xl">
+          <div className="w-16 h-16 bg-indigo-600/10 border border-indigo-500/20 rounded-full flex items-center justify-center mx-auto text-indigo-400">
+            <Clock className="w-8 h-8 animate-pulse" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold text-white">Meeting Not Started Yet</h2>
+            <p className="text-sm text-gray-400">
+              "{meeting.title}" has not been started by the host.
+            </p>
+            <p className="text-xs text-gray-500">
+              Please wait here. Once the host joins, the meeting will start automatically.
+            </p>
+          </div>
+          <div className="pt-2">
+            <Button
+              onClick={handleLeaveMeeting}
+              variant="outline"
+              className="w-full border-white/10 bg-transparent text-gray-300 hover:bg-white/5"
+            >
+              Back to Dashboard
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen bg-[#0a0b0f] flex flex-col overflow-hidden">
       {/* Top Bar */}
@@ -335,35 +388,91 @@ function MeetingRoomContent() {
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Video Grid */}
         <div className="flex-1 p-3 md:p-4 relative overflow-hidden flex flex-col justify-center">
-          <div
-            className={cn(
-              "w-full h-full max-h-full grid gap-2 md:gap-3 overflow-y-auto",
-              displayParticipants.length === 1 && "grid-cols-1",
-              displayParticipants.length === 2 && "grid-cols-1 md:grid-cols-2",
-              displayParticipants.length === 3 && "grid-cols-1 md:grid-cols-2 md:grid-rows-2",
-              displayParticipants.length === 4 && "grid-cols-1 sm:grid-cols-2 md:grid-rows-2",
-              displayParticipants.length > 4 && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-            )}
-          >
-            {displayParticipants.map((participant, index) => {
-              const isLocal = index === 0;
-              const remoteStream = !isLocal
-                ? remoteStreams.get(participant.socketId)
-                : undefined;
+          <div className={cn("w-full h-full flex gap-3", pinnedId ? "flex-col md:flex-row" : "flex-col")}>
+            {pinnedId ? (
+              <>
+                {/* Pinned Video */}
+                <div className="flex-[3] min-h-0 flex items-center justify-center">
+                  {(() => {
+                    const pinnedParticipant = displayParticipants.find(p => p.id === pinnedId);
+                    if (!pinnedParticipant) return null;
+                    const isLocal = pinnedParticipant.id === (user?._id || 'local');
+                    const remoteStream = !isLocal ? remoteStreams.get(pinnedParticipant.socketId) : undefined;
+                    return (
+                      <VideoTile
+                        key={pinnedParticipant.id}
+                        name={pinnedParticipant.name}
+                        isMuted={pinnedParticipant.isMuted}
+                        isVideoOff={pinnedParticipant.isVideoOff}
+                        isSpeaking={pinnedParticipant.isSpeaking}
+                        isLocal={isLocal}
+                        isPinned={true}
+                        onPin={() => setPinnedId(null)}
+                        videoRef={isLocal ? localVideoRef : undefined}
+                        stream={isLocal ? localStream : remoteStream || null}
+                      />
+                    );
+                  })()}
+                </div>
+                {/* Other videos in a smaller list */}
+                <div className="flex-1 min-h-0 overflow-y-auto flex md:flex-col gap-2 md:max-w-[240px]">
+                  {displayParticipants
+                    .filter(p => p.id !== pinnedId)
+                    .map((participant) => {
+                      const isLocal = participant.id === (user?._id || 'local');
+                      const remoteStream = !isLocal ? remoteStreams.get(participant.socketId) : undefined;
+                      return (
+                        <VideoTile
+                          key={participant.id}
+                          name={participant.name}
+                          isMuted={participant.isMuted}
+                          isVideoOff={participant.isVideoOff}
+                          isSpeaking={participant.isSpeaking}
+                          isLocal={isLocal}
+                          isPinned={false}
+                          onPin={() => setPinnedId(participant.id)}
+                          videoRef={isLocal ? localVideoRef : undefined}
+                          stream={isLocal ? localStream : remoteStream || null}
+                        />
+                      );
+                    })}
+                </div>
+              </>
+            ) : (
+              /* Regular Grid */
+              <div
+                className={cn(
+                  "w-full h-full max-h-full grid gap-2 md:gap-3 overflow-y-auto",
+                  displayParticipants.length === 1 && "grid-cols-1",
+                  displayParticipants.length === 2 && "grid-cols-1 md:grid-cols-2",
+                  displayParticipants.length === 3 && "grid-cols-1 md:grid-cols-2 md:grid-rows-2",
+                  displayParticipants.length === 4 && "grid-cols-1 sm:grid-cols-2 md:grid-rows-2",
+                  displayParticipants.length > 4 && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+                )}
+              >
+                {displayParticipants.map((participant, index) => {
+                  const isLocal = index === 0;
+                  const remoteStream = !isLocal
+                    ? remoteStreams.get(participant.socketId)
+                    : undefined;
 
-              return (
-                <VideoTile
-                  key={participant.id}
-                  name={participant.name}
-                  isMuted={participant.isMuted}
-                  isVideoOff={participant.isVideoOff}
-                  isSpeaking={participant.isSpeaking}
-                  isLocal={isLocal}
-                  videoRef={isLocal ? localVideoRef : undefined}
-                  stream={isLocal ? localStream : remoteStream || null}
-                />
-              );
-            })}
+                  return (
+                    <VideoTile
+                      key={participant.id}
+                      name={participant.name}
+                      isMuted={participant.isMuted}
+                      isVideoOff={participant.isVideoOff}
+                      isSpeaking={participant.isSpeaking}
+                      isLocal={isLocal}
+                      isPinned={false}
+                      onPin={() => setPinnedId(participant.id)}
+                      videoRef={isLocal ? localVideoRef : undefined}
+                      stream={isLocal ? localStream : remoteStream || null}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Typing indicator */}

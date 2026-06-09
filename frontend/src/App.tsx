@@ -12,6 +12,7 @@ const MeetingRoomPage = lazy(() => import("./pages/MeetingRoomPage"));
 const PostMeetingPage = lazy(() => import("./pages/PostMeetingPage"));
 const TeamPage = lazy(() => import("./pages/TeamPage"));
 const AnalyticsPage = lazy(() => import("./pages/AnalyticsPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 // Scrolls to top on every page change
@@ -58,6 +59,7 @@ export default function App() {
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="team" element={<TeamPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="meeting/:meetingId/post" element={<PostMeetingPage />} />
           </Route>
 

@@ -51,18 +51,26 @@ export function registerMeetingHandlers(io, socket) {
       console.log(`[meeting] ${socket.user.name} (${socket.id}) joined ${roomId}`);
 
       // Track in Redis
+      const isHost = String(meeting.host) === socket.userId;
+      let meetingStatus = meeting.status;
+
+      if (meeting.status === 'scheduled') {
+        if (isHost) {
+          await Meeting.findByIdAndUpdate(meetingId, { status: 'live', startTime: new Date() });
+          meetingStatus = 'live';
+          // Notify everyone in the room that the meeting has started!
+          io.to(roomId).emit('meeting-started', { meetingId, status: 'live' });
+        }
+      }
+
       await addUserToRoom(meetingId, socket.userId, socket.id, socket.user.name);
       await setRoomMetadata(meetingId, {
         meetingId,
         title: meeting.title,
         hostId: String(meeting.host),
-        status: meeting.status,
+        status: meetingStatus,
         joinedAt: Date.now(),
       });
-
-      if (meeting.status !== 'live') {
-        await Meeting.findByIdAndUpdate(meetingId, { status: 'live' });
-      }
 
       // Create or update participant activity
       await ParticipantActivity.findOneAndUpdate(
@@ -101,7 +109,7 @@ export function registerMeetingHandlers(io, socket) {
         meeting: {
           _id: String(meeting._id),
           title: meeting.title,
-          status: meeting.status === 'ended' ? 'ended' : 'live',
+          status: meetingStatus,
           hostId: String(meeting.host),
         },
       });

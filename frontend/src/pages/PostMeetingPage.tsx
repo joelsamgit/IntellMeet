@@ -51,6 +51,7 @@ const fallbackMeetingData = {
     engagementScore: 0,
     aiConfidence: 0,
   },
+  recording: undefined as string | undefined,
 };
 
 const priorityConfig = {
@@ -145,6 +146,7 @@ export default function PostMeetingPage() {
                   engagementScore: 0,
                   aiConfidence: 0,
                 },
+            recording: meetingDetails?.recording || undefined,
           };
         });
 
@@ -181,7 +183,55 @@ export default function PostMeetingPage() {
   };
 
   const handleExport = () => {
+    if (!meetingData) return;
     toast.success("Exporting meeting report...");
+    
+    let reportContent = `# Meeting Report: ${meetingData.title}\n\n`;
+    reportContent += `**Date:** ${format(meetingData.date, "MMMM d, yyyy 'at' h:mm a")}\n`;
+    reportContent += `**Duration:** ${meetingData.duration}\n`;
+    reportContent += `**Participants:** ${meetingData.participants.map(p => `${p.name} (${p.role})`).join(", ") || "None"}\n\n`;
+    
+    reportContent += `## AI Summary\n${meetingData.summary}\n\n`;
+    
+    reportContent += `## Key Points\n`;
+    if (meetingData.keyPoints.length > 0) {
+      meetingData.keyPoints.forEach(point => {
+        reportContent += `- ${point}\n`;
+      });
+    } else {
+      reportContent += `No key points identified.\n`;
+    }
+    reportContent += `\n`;
+    
+    reportContent += `## Action Items\n`;
+    if (meetingData.actionItems.length > 0) {
+      meetingData.actionItems.forEach(item => {
+        const statusStr = checkedItems.includes(item.id) ? "[x]" : "[ ]";
+        reportContent += `- ${statusStr} ${item.text} (Assignee: ${item.assigneeName}, Due: ${item.due}, Priority: ${item.priority})\n`;
+      });
+    } else {
+      reportContent += `No action items identified.\n`;
+    }
+    reportContent += `\n`;
+    
+    reportContent += `## Transcript\n`;
+    if (meetingData.transcript.length > 0) {
+      meetingData.transcript.forEach(line => {
+        reportContent += `**[${line.time}] ${line.speaker}:** ${line.text}\n\n`;
+      });
+    } else {
+      reportContent += `No transcript available.\n`;
+    }
+    
+    const blob = new Blob([reportContent], { type: "text/markdown;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `meeting-report-${meetingId || "export"}.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleShare = () => {
@@ -415,6 +465,37 @@ export default function PostMeetingPage() {
                     {meetingData.duration}
                   </p>
                   <Button
+                    onClick={async () => {
+                      if (meetingData.recording) {
+                        let url = meetingData.recording;
+                        if (url.startsWith("/")) {
+                          const baseUrl = (import.meta.env.VITE_API_URL || "http://localhost:5000/api").replace(/\/api$/, "");
+                          url = `${baseUrl}${url}`;
+                        }
+                        toast.info("Downloading recording...");
+                        try {
+                          const response = await fetch(url);
+                          if (!response.ok) throw new Error("Network response was not ok");
+                          const blob = await response.blob();
+                          const blobUrl = URL.createObjectURL(blob);
+                          const link = document.createElement("a");
+                          link.href = blobUrl;
+                          link.download = `meeting-recording-${meetingId}.webm`;
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                          URL.revokeObjectURL(blobUrl);
+                          toast.success("Download complete!");
+                        } catch (err) {
+                          console.error(err);
+                          // Fallback to opening in new window/tab if fetch fails (e.g. CORS block)
+                          window.open(url, "_blank");
+                          toast.info("Opened recording in a new tab.");
+                        }
+                      } else {
+                        toast.error("No recording available for this meeting.");
+                      }
+                    }}
                     size="sm"
                     className="w-full bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 text-xs"
                   >
@@ -519,6 +600,26 @@ export default function PostMeetingPage() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => {
+                  if (meetingData.transcript.length === 0) {
+                    toast.error("No transcript available to download.");
+                    return;
+                  }
+                  let transcriptText = "";
+                  meetingData.transcript.forEach(line => {
+                    transcriptText += `[${line.time}] ${line.speaker}: ${line.text}\n`;
+                  });
+                  const blob = new Blob([transcriptText], { type: "text/plain;charset=utf-8;" });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.setAttribute("download", `meeting-transcript-${meetingId || "export"}.txt`);
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  URL.revokeObjectURL(url);
+                  toast.success("Transcript downloaded!");
+                }}
                 className="border-white/10 bg-transparent text-gray-300 hover:bg-white/5 text-xs gap-1.5"
               >
                 <Download className="w-3.5 h-3.5" />

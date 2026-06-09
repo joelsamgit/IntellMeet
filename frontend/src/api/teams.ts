@@ -34,3 +34,18 @@ export const deleteTeam = async (id: string) => {
   const response = await api.delete(`/teams/${id}`);
   return response.data;
 };
+
+export const inviteMember = async (email: string, teamId?: string) => {
+  const response = await api.post('/teams/invite', { email, teamId });
+  return response.data;
+};
+
+export const listPendingInvitations = async () => {
+  const response = await api.get('/teams/invitations/pending');
+  return response.data.invitations || [];
+};
+
+export const respondToInvitation = async (id: string, action: 'accept' | 'decline') => {
+  const response = await api.post(`/teams/invitations/${id}/respond`, { action });
+  return response.data;
+};

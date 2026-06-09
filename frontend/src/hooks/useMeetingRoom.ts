@@ -147,12 +147,18 @@ export function useMeetingRoom({ meetingId, autoJoin = false }: UseMeetingRoomOp
       );
     };
 
+    const handleMeetingStarted = (payload: any) => {
+      console.log('[meeting] meeting-started event received', payload);
+      setMeeting((current) => current ? { ...current, status: 'live' } : null);
+    };
+
     socket.on('connect', handleConnect);
     socket.on('user-joined', handleUserJoined);
     socket.on('user-left', handleUserLeft);
     socket.on('media-state-change', handleMediaStateChange);
     socket.on('screen-share-start', handleScreenShareStart);
     socket.on('screen-share-stop', handleScreenShareStop);
+    socket.on('meeting-started', handleMeetingStarted);
 
     if (socket.connected) {
       joinRoom(true);
@@ -165,6 +171,7 @@ export function useMeetingRoom({ meetingId, autoJoin = false }: UseMeetingRoomOp
       socket.off('media-state-change', handleMediaStateChange);
       socket.off('screen-share-start', handleScreenShareStart);
       socket.off('screen-share-stop', handleScreenShareStop);
+      socket.off('meeting-started', handleMeetingStarted);
     };
   }, [autoJoin, joinRoom, meetingId, socket]);
 

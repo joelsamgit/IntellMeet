@@ -12,6 +12,6 @@ router.use(protect);
 router.get("/profile", ctrl.getProfile);
 router.put("/profile", profileUpdateValidators, validateRequest, ctrl.updateProfile);
 router.post("/avatar", memoryUpload.single("avatar"), ctrl.uploadAvatar);
-router.get("/all", restrictToAdmin, ctrl.listAllUsers);
+router.get("/all", ctrl.listAllUsers);
 
 export default router;

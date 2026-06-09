@@ -36,6 +36,7 @@ const schema = z.object({
   title: z.string().min(3, "Title must be at least 3 characters"),
   date: z.string().optional(),
   time: z.string().optional(),
+  participants: z.string().optional(),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -126,10 +127,17 @@ export default function NewMeetingModal({
     try {
       setIsLoading(true);
       const scheduledTime = new Date(`${data.date}T${data.time}`).toISOString();
+      const participantEmails = data.participants
+        ? data.participants
+            .split(",")
+            .map((e) => e.trim())
+            .filter(Boolean)
+        : [];
       const res = await createMeeting({
         title: data.title,
         scheduledTime,
         status: "scheduled",
+        participantEmails,
       });
       toast.success(`Meeting "${res.meeting.title}" scheduled!`);
       onClose();
@@ -339,8 +347,9 @@ export default function NewMeetingModal({
                   Invite Participants
                 </Label>
                 <Input
-                  type="email"
-                  placeholder="Enter email addresses..."
+                  type="text"
+                  {...register("participants")}
+                  placeholder="colleague@company.com, another@company.com"
                   className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-indigo-500 h-10"
                 />
               </div>

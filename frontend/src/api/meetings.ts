@@ -6,6 +6,7 @@ export const createMeeting = async (data: {
   scheduledTime: string;
   description?: string;
   participantIds?: string[];
+  participantEmails?: string[] | string;
   status?: string;
 }) => {
   const response = await api.post('/meetings/create', data);

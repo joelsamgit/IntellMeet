@@ -14,6 +14,11 @@ router.use(protect);
 
 router.post("/", teamCreateValidators, validateRequest, ctrl.createTeam);
 router.get("/", ctrl.listTeams);
+
+router.post("/invite", ctrl.inviteMember);
+router.get("/invitations/pending", ctrl.listInvitations);
+router.post("/invitations/:id/respond", ctrl.respondToInvitation);
+
 router.get("/:id", teamIdParam, validateRequest, ctrl.getTeam);
 router.put("/:id", teamUpdateValidators, validateRequest, ctrl.updateTeam);
 router.delete("/:id", teamIdParam, validateRequest, ctrl.deleteTeam);

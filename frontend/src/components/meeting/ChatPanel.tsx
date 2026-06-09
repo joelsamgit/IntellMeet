@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, X } from "lucide-react";
+import { Send, X, Smile } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,12 @@ import { Message } from "@/types";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
+
+const popularEmojis = [
+  "😀", "😂", "🤣", "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", 
+  "😜", "🤫", "🤔", "🥳", "😎", "😢", "😭", "😤", "😡", "👍", "👎", "👏", 
+  "🙌", "🎉", "🔥", "❤️", "✨", "🚀"
+];
 
 interface ChatPanelProps {
   messages: Message[];
@@ -23,6 +29,7 @@ export default function ChatPanel({
 }: ChatPanelProps) {
   const { user } = useAuthStore();
   const [input, setInput] = useState("");
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<number | null>(null);
 
@@ -34,6 +41,7 @@ export default function ChatPanel({
     if (!input.trim()) return;
     onSendMessage(input.trim());
     setInput("");
+    setShowEmojiPicker(false);
     onTypingChange?.(false);
     if (typingTimeoutRef.current) {
       window.clearTimeout(typingTimeoutRef.current);
@@ -164,7 +172,33 @@ export default function ChatPanel({
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-white/5">
+      <div className="p-4 border-t border-white/5 relative">
+        {showEmojiPicker && (
+          <div className="absolute bottom-16 right-4 left-4 bg-[#13141a] border border-white/10 rounded-xl p-3 shadow-2xl z-50">
+            <div className="flex justify-between items-center mb-2 pb-1 border-b border-white/5">
+              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Quick Emojis</span>
+              <button 
+                type="button"
+                onClick={() => setShowEmojiPicker(false)}
+                className="text-gray-500 hover:text-white transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-6 gap-2 max-h-32 overflow-y-auto pr-1">
+              {popularEmojis.map((emoji) => (
+                <button
+                  type="button"
+                  key={emoji}
+                  onClick={() => setInput((prev) => prev + emoji)}
+                  className="text-lg p-1 hover:bg-white/5 rounded transition-colors text-center"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <Input
             value={input}
@@ -173,6 +207,16 @@ export default function ChatPanel({
             placeholder="Type a message..."
             className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 text-sm h-9 flex-1"
           />
+          <button
+            type="button"
+            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+            className={cn(
+              "w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 hover:text-white hover:bg-white/5 border border-white/5 transition-all duration-200",
+              showEmojiPicker && "text-indigo-400 bg-white/5 border-indigo-500/20"
+            )}
+          >
+            <Smile className="w-4 h-4" />
+          </button>
           <Button
             onClick={handleSend}
             disabled={!input.trim()}
