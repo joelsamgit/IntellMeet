@@ -47,6 +47,9 @@ export default function App() {
     const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
     const healthUrl = `${apiUrl}/health`;
 
+    let intervalId: any;
+    let timeoutId: any;
+
     async function checkServer() {
       try {
         const res = await fetch(healthUrl);
@@ -68,33 +71,30 @@ export default function App() {
       if (awake) return;
 
       // Retry check every 3 seconds
-      const interval = setInterval(async () => {
+      intervalId = setInterval(async () => {
         const isUp = await checkServer();
         if (isUp) {
-          clearInterval(interval);
+          clearInterval(intervalId);
         }
       }, 3000);
 
       // Timeout after 60 seconds of failure
-      const timeout = setTimeout(() => {
-        clearInterval(interval);
-        if (mounted && !isServerAwake) {
+      timeoutId = setTimeout(() => {
+        clearInterval(intervalId);
+        if (mounted) {
           setWakeError("Server connection timed out. Please try reloading or check if the backend service is running.");
         }
       }, 60000);
-
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timeout);
-      };
     }
 
     void startChecking();
 
     return () => {
       mounted = false;
+      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [isServerAwake]);
+  }, []);
 
   if (!isServerAwake) {
     return (
