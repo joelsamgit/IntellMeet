@@ -41,6 +41,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   const [isServerAwake, setIsServerAwake] = useState(false);
   const [wakeError, setWakeError] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -49,13 +50,17 @@ export default function App() {
 
     let intervalId: any;
     let timeoutId: any;
+    let progressIntervalId: any;
 
     async function checkServer() {
       try {
         const res = await fetch(healthUrl);
         if (res.ok) {
           if (mounted) {
-            setIsServerAwake(true);
+            setProgress(100);
+            setTimeout(() => {
+              if (mounted) setIsServerAwake(true);
+            }, 400);
           }
           return true;
         }
@@ -66,6 +71,14 @@ export default function App() {
     }
 
     async function startChecking() {
+      // Smooth progress indicator over ~50 seconds
+      progressIntervalId = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 98) return prev;
+          return prev + 2;
+        });
+      }, 1000);
+
       // First immediate check
       const awake = await checkServer();
       if (awake) return;
@@ -75,12 +88,14 @@ export default function App() {
         const isUp = await checkServer();
         if (isUp) {
           clearInterval(intervalId);
+          clearInterval(progressIntervalId);
         }
       }, 3000);
 
       // Timeout after 60 seconds of failure
       timeoutId = setTimeout(() => {
         clearInterval(intervalId);
+        clearInterval(progressIntervalId);
         if (mounted) {
           setWakeError("Server connection timed out. Please try reloading or check if the backend service is running.");
         }
@@ -93,6 +108,7 @@ export default function App() {
       mounted = false;
       if (intervalId) clearInterval(intervalId);
       if (timeoutId) clearTimeout(timeoutId);
+      if (progressIntervalId) clearInterval(progressIntervalId);
     };
   }, []);
 
@@ -127,9 +143,20 @@ export default function App() {
                 </Button>
               </div>
             ) : (
-              <div className="flex items-center justify-center gap-2 text-[11px] text-indigo-400 font-medium">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
-                Establishing connection...
+              <div className="space-y-3">
+                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                  <div
+                    className="h-full bg-indigo-500 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+                <div className="flex justify-between items-center text-[10px] text-gray-500 font-medium">
+                  <div className="flex items-center gap-1.5 text-indigo-400">
+                    <span className="w-1 h-1 rounded-full bg-indigo-400 animate-ping" />
+                    Waking up...
+                  </div>
+                  <span>{progress}%</span>
+                </div>
               </div>
             )}
           </div>
