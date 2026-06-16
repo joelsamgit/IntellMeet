@@ -6,6 +6,7 @@ import MainLayout from "./layouts/MainLayout";
 import LoadingSpinner from "@/components/common/LoadingSpinner";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { resolveApiBaseUrl } from "./api/axios";
 
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const SignupPage = lazy(() => import("./pages/SignupPage"));
@@ -45,7 +46,7 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+    const apiUrl = resolveApiBaseUrl();
     const healthUrl = `${apiUrl}/health`;
 
     let intervalId: any;
@@ -127,9 +128,6 @@ export default function App() {
 
             <div className="space-y-2">
               <h2 className="text-lg font-bold text-white">Waking Up IntellMeet Server</h2>
-              <p className="text-xs text-gray-400 max-w-xs mx-auto leading-relaxed">
-                Our free-tier server sleeps after periods of inactivity. It is currently booting up, which typically takes 30-50 seconds.
-              </p>
             </div>
 
             {wakeError ? (

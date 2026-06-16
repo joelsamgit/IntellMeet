@@ -1,13 +1,18 @@
 import axios from "axios";
 
 /** Prefer VITE_API_URL; otherwise match the page hostname so localhost vs 127.0.0.1 stays consistent with CORS/cookies. */
-function resolveApiBaseUrl(): string {
+export function resolveApiBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_API_URL as string | undefined;
   if (fromEnv?.trim()) return fromEnv.trim().replace(/\/$/, "");
+  
   if (typeof window !== "undefined" && window.location?.hostname) {
-    return `${window.location.protocol}//${window.location.hostname}:5000/api`;
+    const hn = window.location.hostname;
+    if (hn === "localhost" || hn === "127.0.0.1" || hn.startsWith("192.168.")) {
+      return `${window.location.protocol}//${hn}:5000/api`;
+    }
   }
-  return "http://localhost:5000/api";
+  // Default production backend fallback
+  return "https://intellmeet-ns5d.onrender.com/api";
 }
 
 const api = axios.create({

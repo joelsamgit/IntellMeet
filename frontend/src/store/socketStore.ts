@@ -11,10 +11,15 @@ interface SocketState {
 function resolveSocketUrl(): string {
   const fromEnv = import.meta.env.VITE_SOCKET_URL as string | undefined;
   if (fromEnv?.trim()) return fromEnv.trim().replace(/\/$/, '');
+  
   if (typeof window !== 'undefined' && window.location?.hostname) {
-    return `${window.location.protocol}//${window.location.hostname}:5000`;
+    const hn = window.location.hostname;
+    if (hn === 'localhost' || hn === '127.0.0.1' || hn.startsWith('192.168.')) {
+      return `${window.location.protocol}//${hn}:5000`;
+    }
   }
-  return 'http://localhost:5000';
+  // Default production socket fallback
+  return 'https://intellmeet-ns5d.onrender.com';
 }
 
 export const useSocketStore = create<SocketState>((set, get) => ({
