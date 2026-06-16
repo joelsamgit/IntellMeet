@@ -17,6 +17,7 @@ import { Bot, Clock, Wifi, WifiOff, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSocketStore } from "@/store/socketStore";
 import type { Participant } from "@/types";
+import { Button } from "@/components/ui/button";
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
   constructor(props: any) {

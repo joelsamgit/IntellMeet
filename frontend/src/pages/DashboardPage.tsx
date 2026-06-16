@@ -19,7 +19,7 @@ import NewMeetingModal from "@/components/common/NewMeetingModal";
 import { Meeting } from "@/types";
 import { format } from "date-fns";
 import { useNotifications } from "@/hooks/useNotifications";
-import { listMeetings } from "@/api/meetings";
+import { listMeetings, deleteMeeting } from "@/api/meetings";
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -97,6 +97,19 @@ export default function DashboardPage() {
 
   const handleJoin = (id: string) => navigate(`/meeting/${id}`);
   const handleViewSummary = (id: string) => navigate(`/meeting/${id}/post`);
+
+  const handleDelete = async (id: string) => {
+    if (window.confirm("Are you sure you want to delete this meeting?")) {
+      try {
+        await deleteMeeting(id);
+        setMeetings((prev) => prev.filter((m) => m._id !== id));
+        toast.success("Meeting deleted successfully!");
+      } catch (error) {
+        console.error("Failed to delete meeting:", error);
+        toast.error("Failed to delete meeting");
+      }
+    }
+  };
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -196,6 +209,7 @@ export default function DashboardPage() {
                   meeting={m}
                   onJoin={handleJoin}
                   onViewSummary={handleViewSummary}
+                  onDelete={handleDelete}
                 />
               ))}
             </div>
@@ -213,6 +227,7 @@ export default function DashboardPage() {
                   meeting={m}
                   onJoin={handleJoin}
                   onViewSummary={handleViewSummary}
+                  onDelete={handleDelete}
                 />
               ))}
             </div>
@@ -235,6 +250,7 @@ export default function DashboardPage() {
                   meeting={m}
                   onJoin={handleJoin}
                   onViewSummary={handleViewSummary}
+                  onDelete={handleDelete}
                 />
               ))
             ) : (

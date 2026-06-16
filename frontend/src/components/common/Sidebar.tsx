@@ -15,7 +15,7 @@ import { toast } from "sonner";
 import { useAuthStore } from "@/store/authStore";
 import { useNotificationStore } from "@/store/notificationStore";
 import Logo from "./Logo";
-import { cn } from "@/lib/utils";
+import { cn, getAvatarUrl } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -199,7 +199,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         {/* User Profile */}
         <div className="flex items-center gap-3 px-3 py-3 mt-2 rounded-lg bg-white/3 border border-white/5">
           <Avatar className="w-8 h-8">
-            <AvatarImage src={user?.avatar} />
+            <AvatarImage src={getAvatarUrl(user?.avatar)} />
             <AvatarFallback className="bg-indigo-600 text-white text-xs font-medium">
               {user?.name ? getInitials(user.name) : "U"}
             </AvatarFallback>

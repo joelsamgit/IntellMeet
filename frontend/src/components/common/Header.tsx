@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
 import NotificationsDropdown from "./NotificationsDropdown";
+import { getAvatarUrl } from "@/lib/utils";
 
 interface HeaderProps {
   title: string;
@@ -61,7 +62,7 @@ export default function Header({ title, subtitle, onMenuClick }: HeaderProps) {
         <NotificationsDropdown />
 
         <Avatar className="w-8 h-8 cursor-pointer">
-          <AvatarImage src={user?.avatar} />
+          <AvatarImage src={getAvatarUrl(user?.avatar)} />
           <AvatarFallback className="bg-indigo-600 text-white text-xs">
             {user?.name?.charAt(0).toUpperCase() || "U"}
           </AvatarFallback>

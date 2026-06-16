@@ -1,4 +1,4 @@
-import { Clock, Users, Video, FileText, MoreVertical, Play } from "lucide-react";
+import { Clock, Users, Video, FileText, MoreVertical, Play, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -6,11 +6,13 @@ import { Meeting } from "@/types";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { useAuthStore } from "@/store/authStore";
 
 interface MeetingCardProps {
   meeting: Meeting;
   onJoin?: (id: string) => void;
   onViewSummary?: (id: string) => void;
+  onDelete?: (id: string) => void;
 }
 
 const statusConfig = {
@@ -31,7 +33,11 @@ const statusConfig = {
   },
 };
 
-export default function MeetingCard({ meeting, onJoin, onViewSummary }: MeetingCardProps) {
+export default function MeetingCard({ meeting, onJoin, onViewSummary, onDelete }: MeetingCardProps) {
+  const { user } = useAuthStore();
+  const isHost = user && meeting.hostId === user._id;
+  const isAdmin = user?.role === "admin";
+  const canDelete = isHost || isAdmin;
   const status = statusConfig[meeting.status];
 
   return (
@@ -100,14 +106,29 @@ export default function MeetingCard({ meeting, onJoin, onViewSummary }: MeetingC
             </Button>
           )}
           {meeting.status === "scheduled" && (
-            <Button
-              size="sm"
-              onClick={() => onJoin?.(meeting._id)}
-              className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/20 h-8 text-xs gap-1"
-            >
-              <Video className="w-3 h-3" />
-              Start
-            </Button>
+            <div className="flex gap-2">
+              {canDelete && (
+                <Button
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete?.(meeting._id);
+                  }}
+                  className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 h-8 text-xs gap-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={() => onJoin?.(meeting._id)}
+                className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/20 h-8 text-xs gap-1"
+              >
+                <Video className="w-3 h-3" />
+                Start
+              </Button>
+            </div>
           )}
           {meeting.status === "ended" && (
             <Button
