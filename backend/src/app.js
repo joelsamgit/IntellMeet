@@ -47,6 +47,15 @@ function isDevLocalOrigin(origin) {
   }
 }
 
+function isVercelOrigin(origin) {
+  try {
+    const u = new URL(origin);
+    return u.hostname.endsWith(".vercel.app") || u.hostname === "vercel.app";
+  } catch {
+    return false;
+  }
+}
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -54,6 +63,7 @@ app.use(
       if (!origin) return callback(null, true);
       if (allowed.includes(origin)) return callback(null, true);
       if (isDevLocalOrigin(origin)) return callback(null, true);
+      if (isVercelOrigin(origin)) return callback(null, true);
       console.warn(`[CORS] Blocked origin: ${origin}`);
       return callback(null, false);
     },
