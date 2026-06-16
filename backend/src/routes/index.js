@@ -24,7 +24,7 @@ router.use("/ai", aiRoutes);
 router.use("/upload", uploadRoutes);
 
 router.get("/health", (req, res) => {
-  res.json({ ok: true, service: "intellmeet-api" });
+  res.json({ ok: true, service: "intellmeet-api", version: "cors-v2" });
 });
 
 export default router;
