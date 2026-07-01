@@ -201,3 +201,39 @@ export const respondToInvitation = asyncHandler(async (req, res) => {
   await invite.save();
   res.json({ message: `Invitation ${action}ed successfully`, invitation: invite });
 });
+
+export const removeMember = asyncHandler(async (req, res) => {
+  const { id, memberId } = req.params;
+  const team = await Team.findById(id);
+  if (!team) throw new AppError("Team not found", 404);
+
+  // Check permissions: only admin or team owner can remove members, or a member leaving themselves
+  const isOwner = String(team.members[0]) === String(req.user._id);
+  const isAdmin = req.user.role === "admin";
+  const isSelf = String(req.user._id) === String(memberId);
+
+  if (!isOwner && !isAdmin && !isSelf) {
+    throw new AppError("You do not have permission to remove this member", 403);
+  }
+
+  // Prevent removing the owner/creator
+  if (String(team.members[0]) === String(memberId) && !isAdmin) {
+    throw new AppError("Cannot remove the team owner/creator from the team", 400);
+  }
+
+  // Remove member from team
+  team.members = team.members.filter((m) => String(m) !== String(memberId));
+  await team.save();
+
+  // Remove team from user's teams list
+  await User.findByIdAndUpdate(memberId, { $pull: { teams: team._id } });
+
+  // Delete any pending invitations for this user to this team
+  const user = await User.findById(memberId);
+  if (user) {
+    await Invitation.deleteMany({ email: user.email.toLowerCase(), team: team._id });
+  }
+
+  res.json({ message: "Member removed successfully", team });
+});
+

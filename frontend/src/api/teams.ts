@@ -49,3 +49,8 @@ export const respondToInvitation = async (id: string, action: 'accept' | 'declin
   const response = await api.post(`/teams/invitations/${id}/respond`, { action });
   return response.data;
 };
+
+export const removeMember = async (teamId: string, memberId: string) => {
+  const response = await api.delete(`/teams/${teamId}/members/${memberId}`);
+  return response.data;
+};

@@ -184,7 +184,7 @@ export default function App() {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="team" element={<TeamPage />} />
-            <Route path="analytics" element={<Navigate to="/dashboard" replace />} />
+            <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="meeting/:meetingId/post" element={<PostMeetingPage />} />
           </Route>

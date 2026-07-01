@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useState, useRef, useEffect } from "react";
 import { Notification } from "@/types";
+import { useNavigate } from "react-router-dom";
 
 const typeConfig = {
   system: {
@@ -32,6 +33,7 @@ export default function NotificationsDropdown() {
   const { notifications, unreadCount, markAsRead, markAllAsRead, isOpen, setIsOpen } =
     useNotificationStore();
   const ref = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   // Close on outside click
   useEffect(() => {
@@ -115,6 +117,19 @@ export default function NotificationsDropdown() {
                       <p className={cn("text-xs leading-relaxed", n.read ? "text-gray-400" : "text-white")}>
                         {n.message}
                       </p>
+                      {n.message.toLowerCase().includes("invite") && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMarkRead(n);
+                            setIsOpen(false);
+                            navigate("/team?tab=teams");
+                          }}
+                          className="mt-2 text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-2 py-1 rounded transition-colors block"
+                        >
+                          View Invitation
+                        </button>
+                      )}
                       <p className="text-xs text-gray-600 mt-1">
                         {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true })}
                       </p>

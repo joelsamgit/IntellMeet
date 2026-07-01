@@ -4,6 +4,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 interface TeamMember {
   id: string;
@@ -24,8 +32,39 @@ const statusConfig = {
   away: { color: "bg-yellow-500", label: "Away" },
 };
 
-export default function TeamMemberCard({ member }: { member: TeamMember }) {
+interface TeamMemberCardProps {
+  member: TeamMember;
+  currentUserTeams?: any[];
+  currentUserId?: string;
+  currentUserRole?: string;
+  onRemoveMember?: (memberId: string, teamId: string, teamName: string) => void;
+}
+
+export default function TeamMemberCard({
+  member,
+  currentUserTeams = [],
+  currentUserId,
+  currentUserRole,
+  onRemoveMember,
+}: TeamMemberCardProps) {
   const status = statusConfig[member.status];
+
+  const memberTeams = (currentUserTeams || []).filter((team) => {
+    const isMember = team.members?.some((tm: any) => tm._id === member.id);
+    const isOwner = team.members?.[0]?._id === currentUserId;
+    const isAdmin = currentUserRole === "admin";
+    const isTargetOwner = team.members?.[0]?._id === member.id;
+
+    if (member.id === currentUserId) {
+      // This is the current user (me)
+      // I can leave any team I am a member of, as long as I am not the owner of it
+      return isMember && !isTargetOwner;
+    } else {
+      // This is another user
+      // I can remove them if I am the owner or admin, and they are not the owner
+      return isMember && (isOwner || isAdmin) && !isTargetOwner;
+    }
+  });
 
   return (
     <div className="bg-[#13141a] border border-white/5 rounded-xl p-5 hover:border-white/10 transition-all duration-200 group">
@@ -59,16 +98,42 @@ export default function TeamMemberCard({ member }: { member: TeamMember }) {
           >
             <Mail className="w-3.5 h-3.5" />
           </button>
-          <button className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
-            <MoreHorizontal className="w-3.5 h-3.5" />
-          </button>
+          {memberTeams.length > 0 && onRemoveMember ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
+                  <MoreHorizontal className="w-3.5 h-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="bg-[#1c1d24] border border-white/10 text-white min-w-[160px] p-1.5 rounded-lg shadow-lg">
+                <DropdownMenuLabel className="text-gray-400 text-[10px] px-2 py-1 font-medium">Actions</DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-white/5 my-1" />
+                {memberTeams.map((team) => (
+                  <DropdownMenuItem
+                    key={team._id}
+                    onClick={() => onRemoveMember(member.id, team._id, team.name)}
+                    className="text-red-400 hover:text-red-300 focus:bg-red-500/10 focus:text-red-400 text-xs cursor-pointer px-2 py-1.5 rounded-md hover:bg-white/5 transition-colors flex items-center gap-1.5"
+                  >
+                    {member.id === currentUserId ? `Leave ${team.name}` : `Remove from ${team.name}`}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <button className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 cursor-not-allowed opacity-50">
+              <MoreHorizontal className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* Info */}
       <div className="space-y-1 mb-4">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-white">{member.name}</h3>
+          <h3 className="text-sm font-semibold text-white">
+            {member.name}
+            {member.id === currentUserId && <span className="text-gray-400 font-normal"> (me)</span>}
+          </h3>
           {member.isHost && (
             <Crown className="w-3.5 h-3.5 text-yellow-400" />
           )}

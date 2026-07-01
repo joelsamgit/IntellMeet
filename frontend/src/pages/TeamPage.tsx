@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Users,
   Plus,
@@ -10,7 +10,7 @@ import {
   X as XIcon,
   Video,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -23,14 +23,24 @@ import KanbanBoard from "@/components/team/KanbanBoard";
 import { listAllUsers } from "@/api/users";
 import { listMeetings, createMeeting } from "@/api/meetings";
 import { listTasks } from "@/api/tasks";
-import { listTeams, inviteMember, listPendingInvitations, respondToInvitation } from "@/api/teams";
+import { listTeams, inviteMember, listPendingInvitations, respondToInvitation, removeMember } from "@/api/teams";
 import { useAuthStore } from "@/store/authStore";
 
 export default function TeamPage() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const tabParam = searchParams.get("tab");
+
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState("members");
+  const [activeTab, setActiveTab] = useState(tabParam || "members");
+
+  useEffect(() => {
+    if (tabParam) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
   const [members, setMembers] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
   const [invitations, setInvitations] = useState<any[]>([]);
@@ -110,82 +120,86 @@ export default function TeamPage() {
     }
   };
 
-  useEffect(() => {
-    let mounted = true;
-    async function loadMembers() {
-      try {
-        const [users, fetchedMeetings, fetchedTasks] = await Promise.all([
-          listAllUsers(),
-          listMeetings(),
-          listTasks(),
-        ]);
-        if (mounted) {
-          // Calculate start of current week
-          const now = new Date();
-          const startOfWeek = new Date(now);
-          startOfWeek.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));
-          startOfWeek.setHours(0, 0, 0, 0);
+  const loadMembers = useCallback(async () => {
+    try {
+      const [users, fetchedMeetings, fetchedTasks] = await Promise.all([
+        listAllUsers(),
+        listMeetings(),
+        listTasks(),
+      ]);
+      // Calculate start of current week
+      const now = new Date();
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));
+      startOfWeek.setHours(0, 0, 0, 0);
 
-          setMembers(
-            users.map((u) => {
-              const tasksCompleted = fetchedTasks.filter(
-                (t) => t.assignee?._id === u._id && t.status === "done"
-              ).length;
+      setMembers(
+        users.map((u) => {
+          const tasksCompleted = fetchedTasks.filter(
+            (t) => t.assignee?._id === u._id && t.status === "done"
+          ).length;
 
-              const meetingsThisWeek = fetchedMeetings.filter((m) => {
-                const mDate = new Date(m.startTime);
-                if (mDate < startOfWeek) return false;
-                const isHost = m.hostId === u._id;
-                const isParticipant = m.participants?.some((p) => p._id === u._id);
-                return isHost || isParticipant;
-              }).length;
+          const meetingsThisWeek = fetchedMeetings.filter((m) => {
+            const mDate = new Date(m.startTime);
+            if (mDate < startOfWeek) return false;
+            const isHost = m.hostId === u._id;
+            const isParticipant = m.participants?.some((p) => p._id === u._id);
+            return isHost || isParticipant;
+          }).length;
 
-              return {
-                id: u._id,
-                name: u.name,
-                email: u.email,
-                role: u.role === "admin" ? "Host / Admin" : "Team Member",
-                status: "online",
-                tasksCompleted,
-                meetingsThisWeek,
-                avatar: u.avatar || "",
-              };
-            })
-          );
-        }
-      } catch (err) {
-        console.error("Failed to load members:", err);
-      } finally {
-        if (mounted) setIsLoading(false);
-      }
+          return {
+            id: u._id,
+            name: u.name,
+            email: u.email,
+            role: u.role === "admin" ? "Host / Admin" : "Team Member",
+            status: "online",
+            tasksCompleted,
+            meetingsThisWeek,
+            avatar: u.avatar || "",
+          };
+        })
+      );
+    } catch (err) {
+      console.error("Failed to load members:", err);
+    } finally {
+      setIsLoading(false);
     }
-    loadMembers();
-    loadTeamsAndInvites();
-    return () => {
-      mounted = false;
-    };
   }, []);
 
-  // Filter members to only show users who are in any team I am in (or invited to)
+  const handleRemoveMember = async (memberId: string, teamId: string, teamName: string) => {
+    if (!window.confirm(`Are you sure you want to remove this member from "${teamName}"?`)) {
+      return;
+    }
+    try {
+      await removeMember(teamId, memberId);
+      toast.success("Member removed successfully!");
+      loadMembers();
+      loadTeamsAndInvites();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to remove member.");
+    }
+  };
+
+  useEffect(() => {
+    loadMembers();
+    loadTeamsAndInvites();
+  }, [loadMembers]);
+
+  // Filter members to only show users who are in any team I am in
   const relevantMembers = members.filter((m) => {
     // 1. Current user is always relevant
     if (m.id === user?._id || m.email.toLowerCase() === user?.email?.toLowerCase()) {
       return true;
     }
     
-    // 2. Check if this user is a member of any of my teams, or has a pending invitation
+    // 2. Check if this user is a member of any of my teams
     return teams.some((team) => {
       // Is a member of the team
       const isMember = team.members?.some((tm: any) => 
         (tm._id && tm._id === m.id) || (tm.email && tm.email.toLowerCase() === m.email.toLowerCase())
       );
       if (isMember) return true;
-
-      // Has a pending invitation to the team
-      const isInvited = team.pendingInvitations?.some((email: string) => 
-        email.toLowerCase() === m.email.toLowerCase()
-      );
-      if (isInvited) return true;
 
       return false;
     });
@@ -303,7 +317,14 @@ export default function TeamPage() {
             {filteredMembers.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {filteredMembers.map((member) => (
-                  <TeamMemberCard key={member.id} member={member} />
+                  <TeamMemberCard
+                    key={member.id}
+                    member={member}
+                    currentUserTeams={teams}
+                    currentUserId={user?._id}
+                    currentUserRole={user?.role}
+                    onRemoveMember={handleRemoveMember}
+                  />
                 ))}
               </div>
             ) : (

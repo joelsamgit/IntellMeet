@@ -54,6 +54,7 @@ export interface Notification {
   read: boolean;
   createdAt: string;
   type: "mention" | "action_item" | "meeting" | "system";
+  meta?: any;
 }
 
 export interface Participant {
